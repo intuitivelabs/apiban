@@ -1,0 +1,43 @@
+# nfpm example config file
+#
+# check https://nfpm.goreleaser.com/configuration for detailed usage
+#
+name: "apiban-ipsets"
+arch: "amd64"
+platform: "linux"
+version: "v0.1.1"
+section: "default"
+priority: "extra"
+provides:
+- apiban-ipsets
+depends:
+- ipset
+conflicts:
+maintainer: "Vladimir Broz <vlada@intuitivelabs.com"
+description: |
+  An Apiban based client for blocking the banned IP addresses
+vendor: "Intuitive Labs GmbH"
+homepage: "https://intuitivelabs.com"
+license: "GPLv2"
+#changelog: "changelog.yaml"
+files:
+  ./apiban-ipsets: "/usr/local/bin/apiban-ipsets"
+config_files:
+  ./config.json: "/etc/apiban/config.json"
+  ./apiban-ipsets.service: "/usr/lib/systemd/system/apiban-ipsets.service"
+overrides:
+  rpm:
+    scripts:
+      #preinstall: ./scripts/preinstall.sh
+      #postremove: ./scripts/postremove.sh
+  deb:
+    scripts:
+      #postinstall: ./scripts/postinstall.sh
+      #preremove: ./scripts/preremove.sh
+
+rpm:
+  group: Applications/Internet
+  summary: Apiban client using ipsets
+  config_noreplace_files:
+    config.json: /etc/apiban/config.json
+      

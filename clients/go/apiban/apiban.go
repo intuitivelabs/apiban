@@ -23,6 +23,7 @@ package apiban
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -55,7 +56,7 @@ type Entry struct {
 // Banned returns a set of banned addresses, optionally limited to the
 // specified startFrom ID.  If no startFrom is supplied, the entire current list will
 // be pulled.
-func Banned(key string, startFrom string) (*Entry, error) {
+func Banned(key string, startFrom string, url string) (*Entry, error) {
 	if key == "" {
 		return nil, errors.New("API Key is required")
 	}
@@ -68,17 +69,27 @@ func Banned(key string, startFrom string) (*Entry, error) {
 		ID: startFrom,
 	}
 
+	// use insecure if configured - TESTING PURPOSES ONLY!
+	transCfg := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
+	client := &http.Client{Transport: transCfg}
+
 	for {
-		e, err := queryServer(http.DefaultClient, fmt.Sprintf("%s%s/banned/%s", RootURL, key, out.ID))
+		//e, err := queryServer(http.DefaultClient, fmt.Sprintf("%s%s/banned/%s", url, key, out.ID))
+		e, err := queryServer(client, fmt.Sprintf("%s%s/banned/%s", url, key, out.ID))
+		fmt.Println("%s%s/banned/%s", url, key, out.ID)
+		fmt.Println("e", e)
 		if err != nil {
 			return nil, err
 		}
 
-		if e.ID == "none" {
+		if e.ID == "none" || len(e.IPs) == 0 {
 			// List complete
 			return out, nil
 		}
 		if e.ID == "" {
+			fmt.Println("e.ID empty")
 			return nil, errors.New("empty ID received")
 		}
 
@@ -87,6 +98,7 @@ func Banned(key string, startFrom string) (*Entry, error) {
 
 		// Aggregate the received IPs
 		out.IPs = append(out.IPs, e.IPs...)
+		fmt.Println("out.IPS %s", out.IPs)
 	}
 }
 
@@ -121,24 +133,29 @@ func Check(key string, ip string) (bool, error) {
 }
 
 func queryServer(c *http.Client, u string) (*Entry, error) {
-	resp, err := http.Get(u)
+	//resp, err := http.Get(u)
+	resp, err := c.Get(u)
 	if err != nil {
 		return nil, fmt.Errorf("Query Error: %s", err.Error())
 	}
 	defer resp.Body.Close()
 
+	//fmt.Println("Status code", resp.StatusCode)
 	// StatusBadRequest (400) has a number of special cases to handle
 	if resp.StatusCode == http.StatusBadRequest {
 		return processBadRequest(resp)
 	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, fmt.Errorf("rate limit reached (%d): %s from %q", resp.StatusCode, resp.Status, u)
+	}
 	if resp.StatusCode > 400 && resp.StatusCode < 500 {
-		return nil, fmt.Errorf("client error (%d) from apiban.org: %s from %q", resp.StatusCode, resp.Status, u)
+		return nil, fmt.Errorf("client error (%d): %s from %q", resp.StatusCode, resp.Status, u)
 	}
 	if resp.StatusCode >= 500 {
-		return nil, fmt.Errorf("server error (%d) from apiban.org: %s from %q", resp.StatusCode, resp.Status, u)
+		return nil, fmt.Errorf("server error (%d): %s from %q", resp.StatusCode, resp.Status, u)
 	}
 	if resp.StatusCode > 299 {
-		return nil, fmt.Errorf("unhandled error (%d) from apiban.org: %s from %q", resp.StatusCode, resp.Status, u)
+		return nil, fmt.Errorf("unhandled error (%d): %s from %q", resp.StatusCode, resp.Status, u)
 	}
 
 	entry := new(Entry)
@@ -146,6 +163,7 @@ func queryServer(c *http.Client, u string) (*Entry, error) {
 		return nil, fmt.Errorf("failed to decode server response: %s", err.Error())
 	}
 
+	//fmt.Println("entry from queryServer", entry)
 	return entry, nil
 }
 

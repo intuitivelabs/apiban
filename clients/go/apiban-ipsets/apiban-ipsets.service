@@ -1,0 +1,14 @@
+[Unit]
+Description=Apiban based client for blocking banned IP addresses using ipsets
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/apiban-ipsets
+Restart=always
+TimeoutStopSec=300
+RestartSec=60
+StartLimitInterval=0
+
+[Install]
+WantedBy=multi-user.target
