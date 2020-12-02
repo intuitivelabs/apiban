@@ -48,7 +48,7 @@ var interval int
 var cleanStart string
 
 func init() {
-	flag.StringVar(&chain, "chain", "BLACKLI", "chain for matching entries")
+	flag.StringVar(&chain, "chain", "BLACKLIST", "chain for matching entries")
 	flag.StringVar(&configFileLocation, "config", "", "location of configuration file")
 	flag.StringVar(&logFile, "log", "/var/log/apiban-client.log", "location of log file or - for stdout")
 	flag.StringVar(&url, "url", "https://leva.frafos.com/api/KEY/banned", "URL of blacklisted IPs DB")
@@ -143,7 +143,7 @@ func main() {
 
 	// Open our Log
 	if logFile != "-" && logFile != "stdout" {
-		lf, err := os.OpenFile("/var/log/apiban-client.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		lf, err := os.OpenFile("/var/log/apiban-ipsets.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
 			log.Panic(err)
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -154,7 +154,7 @@ func main() {
 		log.SetOutput(lf)
 	}
 
-	log.Print("** Started APIBAN CLIENT")
+	log.Print("** Started APIBAN IPSETS CLIENT")
 	log.Print("Licensed under GPLv2. See LICENSE for details.")
 
 	// Open our config file
@@ -216,10 +216,9 @@ func main() {
 
 	fmt.Println("about to create ipset")
 	blset, err := initializeIPTables(ipt, apiconfig.CHAIN)
-	fmt.Println("ERROR %s", err)
 
 	if err != nil {
-		log.Fatalln("failed to initialize IPTables:", err)
+		log.Fatalln("failed to initialize iptables and ipsets", err)
 	}
 
 	//if iptinit == "chain created" {
@@ -470,9 +469,9 @@ func initializeIPTables(ipt *iptables.IPTables, blChain string) (*ipset.IPSet, e
 	*/
 	blset, err := ipset.New("blacklist", "hash:ip", &ipset.Params{})
 	if err != nil {
-		//return "error", fmt.Errorf("failed to add ipset chain to INPUT chain: %w", err)
-		fmt.Println("Error:", err)
-		//	return nil, fmt.Errorf("failed to create ipset: %w", err)
+		// failed to create ipset - ipset utility missing?
+		//fmt.Println("Error:", err)
+		return nil, fmt.Errorf("failed to create ipset: %w", err)
 	}
 
 	// workaround - flush our CHAIN first
