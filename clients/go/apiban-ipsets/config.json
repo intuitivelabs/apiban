@@ -1,5 +1,8 @@
 {
-	"APIKEY":"MY API KEY",
-	"LKID":"100",
-	"VERSION":"0.6"
+	"APIKEY": "CUSTOMER_ID",
+	"LKID": "100",
+	"VERSION": "0.6",
+	"URL": "https://siem.intuitivelabs.com/api/",
+	"CHAIN": "BLOCKER",
+	"INTERVAL": "60s"
 }
