@@ -323,12 +323,12 @@ func LoadConfig() (*ApibanConfig, error) {
 	// If we can determine the user configuration directory, try there
 	configDir, err := os.UserConfigDir()
 	if err == nil {
-		fileLocations = append(fileLocations, fmt.Sprintf("%s/apiban/config.json", configDir))
+		fileLocations = append(fileLocations, fmt.Sprintf("%s/apiban-ipsets/config.json", configDir))
 	}
 
 	// Add standard static locations
 	fileLocations = append(fileLocations,
-		"/etc/apiban/config.json",
+		"/etc/apiban-ipsets/config.json",
 		"config.json",
 		"/usr/local/bin/apiban/config.json",
 	)
