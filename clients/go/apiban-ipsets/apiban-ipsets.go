@@ -45,7 +45,7 @@ var logFile string
 var url string
 var chain string
 var interval int
-var cleanStart string
+var full string
 
 func init() {
 	flag.StringVar(&chain, "chain", "BLOCKER", "chain for matching entries")
@@ -53,19 +53,19 @@ func init() {
 	flag.StringVar(&logFile, "log", "/var/log/apiban-ipsets.log", "location of log file or - for stdout")
 	flag.StringVar(&url, "url", "https://siem.intuitivelabs.com/api/", "URL of blacklisted IPs DB")
 	flag.IntVar(&interval, "interval", 60, "interval in seconds for the list refresh")
-	flag.StringVar(&cleanStart, "cleanstart", "no", "yes/no - starting from scratch")
+	flag.StringVar(&full, "full", "no", "yes/no - starting from scratch")
 	//flag.StringVar(&url, "url", "https://latewed-alb-11jg2pxd7j3ue-835913326.eu-west-1.elb.amazonaws.com/stats?table=ipblacklist&json", "URL of blacklisted IPs DB")
 }
 
 // ApibanConfig is the structure for the JSON config file
 type ApibanConfig struct {
-	APIKEY     string `json:"APIKEY"`
-	LKID       string `json:"LKID"`
-	VERSION    string `json:"VERSION"`
-	URL        string `json:"URL"`
-	CHAIN      string `json:"CHAIN"`
-	TICK       string `json:"INTERVAL"`
-	CLEANSTART string `json:"CLEANSTART"`
+	APIKEY  string `json:"APIKEY"`
+	LKID    string `json:"LKID"`
+	VERSION string `json:"VERSION"`
+	URL     string `json:"URL"`
+	CHAIN   string `json:"CHAIN"`
+	TICK    string `json:"INTERVAL"`
+	FULL    string `json:"FULL"`
 
 	sourceFile string
 }
