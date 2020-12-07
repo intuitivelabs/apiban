@@ -78,8 +78,6 @@ func Banned(key string, startFrom string, url string) (*Entry, error) {
 	for {
 		//e, err := queryServer(http.DefaultClient, fmt.Sprintf("%s%s/banned/%s", url, key, out.ID))
 		e, err := queryServer(client, fmt.Sprintf("%s%s/banned/%s", url, key, out.ID))
-		fmt.Println("%s%s/banned/%s", url, key, out.ID)
-		fmt.Println("e", e)
 		if err != nil {
 			return nil, err
 		}
@@ -98,7 +96,6 @@ func Banned(key string, startFrom string, url string) (*Entry, error) {
 
 		// Aggregate the received IPs
 		out.IPs = append(out.IPs, e.IPs...)
-		fmt.Println("out.IPS %s", out.IPs)
 	}
 }
 
