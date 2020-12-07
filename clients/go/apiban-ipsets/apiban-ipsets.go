@@ -167,6 +167,8 @@ func main() {
 	if apiconfig.APIKEY == "" {
 		log.Fatalln("Invalid APIKEY. Exiting.")
 	}
+	// log config values
+	log.Print("CLI of FULL received, resetting LKID")
 
 	// allow cli of FULL to reset LKID to 100
 	if len(os.Args) > 1 {
@@ -180,8 +182,8 @@ func main() {
 	}
 
 	// reset LKID to 100 if specified in config file
-	if apiconfig.CLEANSTART == "yes" {
-		log.Print("Clean start in config file, resetting LKID")
+	if apiconfig.FULL == "yes" {
+		log.Print("FULL=yes in config file, resetting LKID")
 		apiconfig.LKID = "100"
 	}
 
@@ -190,17 +192,14 @@ func main() {
 		log.Print("Resetting LKID")
 		apiconfig.LKID = "100"
 	} else {
-		log.Print("using LKID", apiconfig.LKID)
+		log.Print("LKID:", apiconfig.LKID)
 	}
 
-	log.Print("Using chain: ", apiconfig.CHAIN)
-	// if no LKID, reset it to 100
+	// use default
 	if len(apiconfig.CHAIN) == 0 {
-		log.Print("Using chain: ", apiconfig.CHAIN)
-		apiconfig.LKID = "100"
-	} else {
-		log.Print("using LKID", apiconfig.LKID)
+		apiconfig.CHAIN = "BLOCKER"
 	}
+	log.Print("Chain:", apiconfig.CHAIN)
 
 	log.Print("Interval for checking the list:", apiconfig.TICK)
 
@@ -214,7 +213,7 @@ func main() {
 	//		log.Fatalln("failed to initialize IPTables:", err)
 	//	}
 
-	fmt.Println("about to create ipset")
+	fmt.Println("Creating ipset...")
 	blset, err := initializeIPTables(ipt, apiconfig.CHAIN)
 
 	if err != nil {
