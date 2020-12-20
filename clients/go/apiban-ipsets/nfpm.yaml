@@ -23,7 +23,6 @@ license: "GPLv2"
 files:
   ./apiban-ipsets: "/usr/local/bin/apiban-ipsets"
 config_files:
-  ./config.json: "/etc/apiban/config.json"
   ./apiban-ipsets.service: "/usr/lib/systemd/system/apiban-ipsets.service"
 overrides:
   rpm:
