@@ -43,14 +43,20 @@ var (
 // Banned)
 var ErrBadRequest = errors.New("Bad Request")
 
+var IPMapKeys = [...]string{"IP", "fromua", "encrypt", "exceeded", "count", "timestamp"}
+
+type IPMap map[string]interface{}
+
 // Entry describes a set of blocked IP addresses from APIBAN.org
 type Entry struct {
+	// omit Meta when decoding
+	Meta interface{} `json:"-"`
 
 	// ID is the timestamp of the next Entry
 	ID string `json:"ID"`
 
 	// IPs is the list of blocked IP addresses in this entry
-	IPs []string `json:"ipaddress"`
+	IPs []IPMap `json:"ipaddress"`
 }
 
 // Banned returns a set of banned addresses, optionally limited to the
@@ -119,7 +125,7 @@ func Check(key string, ip string) (bool, error) {
 	if entry == nil {
 		return false, errors.New("empty entry received")
 	} else if len(entry.IPs) == 1 {
-		if entry.IPs[0] == "not blocked" {
+		if entry.IPs[0]["IP"] == "not blocked" {
 			// Not blocked
 			return false, nil
 		}
@@ -189,7 +195,7 @@ func processBadRequest(resp *http.Response) (*Entry, error) {
 		}
 
 		if len(e.IPs) > 0 {
-			switch e.IPs[0] {
+			switch e.IPs[0]["IP"] {
 			case "no new bans":
 				return e, nil
 			}
