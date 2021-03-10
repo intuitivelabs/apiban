@@ -23,6 +23,7 @@ package main
 
 import (
 	"context"
+	"crypto/cipher"
 	"encoding/json"
 	"encoding/xml"
 	"errors"
@@ -36,6 +37,7 @@ import (
 	"time"
 
 	"github.com/coreos/go-iptables/iptables"
+	"github.com/intuitivelabs/anonymization"
 	"github.com/vladabroz/apiban/clients/go/apiban"
 	"github.com/vladabroz/go-ipset/ipset"
 )
@@ -46,6 +48,8 @@ var url string
 var chain string
 var interval int
 var full string
+var ipcipher cipher.Block
+var validator anonymization.Validator
 
 func init() {
 	flag.StringVar(&chain, "chain", "BLOCKER", "chain for matching entries")
@@ -66,6 +70,8 @@ type ApibanConfig struct {
 	CHAIN   string `json:"CHAIN"`
 	TICK    string `json:"INTERVAL"`
 	FULL    string `json:"FULL"`
+	// passphrase used to generate encryption key for anonymization
+	PASSPHRASE string `json:"PASSPHRASE"`
 
 	sourceFile string
 }
@@ -203,6 +209,16 @@ func main() {
 
 	log.Print("Interval for checking the list:", apiconfig.TICK)
 
+	// generate encryption key from passphrase
+	if len(apiconfig.PASSPHRASE) > 0 {
+		if ipcipher, err = anonymization.NewPassphraseCipher(apiconfig.PASSPHRASE); err != nil {
+			log.Fatalln("Cannot initialize ipcipher. Exiting.")
+		}
+		// initialize a validator using the configured passphrase; neither length nor salt are used since this validator verifies only the remote code
+		if validator, err = anonymization.NewPassphraseValidator(apiconfig.PASSPHRASE, 0 /*length*/, "" /*salt*/); err != nil {
+			log.Fatalln("Cannot initialize validator. Exiting.")
+		}
+	}
 	// Go connect for IPTABLES
 	ipt, err := iptables.New()
 	if err != nil {
@@ -254,6 +270,7 @@ func run(ctx context.Context, blset ipset.IPSet, apiconfig ApibanConfig) error {
 		log.Print("Invalid interval format")
 		return err
 	}
+	encryptionOn := len(apiconfig.PASSPHRASE) > 0
 
 	for {
 		select {
@@ -293,11 +310,38 @@ func run(ctx context.Context, blset ipset.IPSet, apiconfig ApibanConfig) error {
 							log.Print("Entry NOT existing...")
 						}
 					*/
-					err := blset.Add(s, 0)
+					// check if the "IP" field is present
+					ip, ok := s["IP"]
+					if !ok {
+						continue
+					}
+					// check the string type for the "IP" field
+					ipStr, ok := ip.(string)
+					if !ok {
+						continue
+					}
+					// check if "encrypt" field is present
+					if kvCode, ok := s["encrypt"]; ok {
+						// check the string type for "encrypt" field
+						kvCodeStr, ok := kvCode.(string)
+						if !ok {
+							continue
+						}
+						if !encryptionOn {
+							log.Print("IP encrypted but no passphrase configured")
+							continue
+						}
+						if !validator.Validate(kvCodeStr) {
+							log.Print("IP encrypted but wrong passphrase configured")
+							continue
+						}
+						ipStr = ipcipher.(*anonymization.Ipcipher).DecryptStr(ipStr)
+					}
+					err := blset.Add(ip.(string), 0)
 					if err != nil {
 						log.Print("Adding IP to ipset failed. ", err.Error())
 					} else {
-						log.Print("Processing IP: ", s)
+						log.Print("Processing IP: ", ip)
 					}
 				}
 				// Update the config with the updated LKID
