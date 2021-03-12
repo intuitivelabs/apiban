@@ -2,11 +2,11 @@ package apiban
 
 import (
 	"fmt"
+	"github.com/stretchr/testify/assert"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 )
 
 // use this counter to count the number of requests
@@ -93,8 +93,16 @@ var mockServer = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			counter += 1
 			w.WriteHeader(http.StatusOK)
 			if counter < 2 {
+				var jsonData = `{
+									"metadata": {},
+									"ipaddress": [
+										{"IP": "1.2.3.251"},
+										{"IP": "1.2.3.252"}
+									],
+									"ID": "%d"
+								}`
 				// if the counter is below 5, return data
-				_, _ = w.Write([]byte(fmt.Sprintf("{\"ipaddress\": [\"1.2.3.251\", \"1.2.3.252\"], \"ID\": \"%d\"}", ID)))
+				_, _ = w.Write([]byte(fmt.Sprintf(jsonData, ID)))
 			} else {
 				// reset counter, don't return anything
 				_, _ = w.Write([]byte("{\"ID\": \"none\"}"))
@@ -106,11 +114,27 @@ var mockServer = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if r.URL.EscapedPath() == testPathCheck || r.URL.EscapedPath() == testPathCheckNotBlocked {
 		if r.Method == "GET" {
+			var (
+				jsonDataBlocked = `{
+										"metadata": {},
+										"ipaddress": [
+											{"IP": "1.2.3.251"}
+										 ],
+										"ID": "987654321"
+								   }`
+				jsonDataNotBlocked = `{
+										"metadata": {},
+										"ipaddress": [
+											{"IP": "not blocked"}
+										 ],
+										"ID": "none"
+									   }`
+			)
 			w.WriteHeader(http.StatusOK)
 			if r.URL.EscapedPath() == testPathCheck {
-				_, _ = w.Write([]byte("{\"ipaddress\":[\"1.2.3.251\"], \"ID\":\"987654321\"}"))
+				_, _ = w.Write([]byte(jsonDataBlocked))
 			} else {
-				_, _ = w.Write([]byte("{\"ipaddress\":[\"not blocked\"], \"ID\":\"none\"}"))
+				_, _ = w.Write([]byte(jsonDataNotBlocked))
 			}
 			return
 		}
@@ -146,8 +170,10 @@ func TestBanned(t *testing.T) {
 			},
 			expected: mockOutput{
 				data: &Entry{
-					ID:  "100",
-					IPs: []string{"1.2.3.251", "1.2.3.252"},
+					ID: "100",
+					IPs: []IPMap{
+						{"IP": "1.2.3.251"}, {"IP": "1.2.3.252"},
+					},
 				},
 			},
 		},
@@ -158,8 +184,10 @@ func TestBanned(t *testing.T) {
 			},
 			expected: mockOutput{
 				data: &Entry{
-					ID:  "1234567890",
-					IPs: []string{"1.2.3.251", "1.2.3.252"},
+					ID: "1234567890",
+					IPs: []IPMap{
+						{"IP": "1.2.3.251"}, {"IP": "1.2.3.252"},
+					},
 				},
 			},
 		},
@@ -169,7 +197,7 @@ func TestBanned(t *testing.T) {
 				startFrom: "12345678901",
 			},
 			expected: mockOutput{
-				err: fmt.Errorf("client error (408) from apiban.org: 408 Request Timeout from \"%s/testKey/banned/12345678901\"", testServer.URL),
+				err: fmt.Errorf("client error (408): 408 Request Timeout from \"%s/testKey/banned/12345678901\"", testServer.URL),
 			},
 		},
 		"no key": {
@@ -182,7 +210,7 @@ func TestBanned(t *testing.T) {
 				key: "badKey",
 			},
 			expected: mockOutput{
-				err: fmt.Errorf("client error (404) from apiban.org: 404 Not Found from \"%s/badKey/banned/100\"", testServer.URL),
+				err: fmt.Errorf("client error (404): 404 Not Found from \"%s/badKey/banned/100\"", testServer.URL),
 			},
 		},
 		"unreachable destination": {
@@ -191,16 +219,14 @@ func TestBanned(t *testing.T) {
 				badEndpoint: true,
 			},
 			expected: mockOutput{
-				err: fmt.Errorf("Query Error: Get \"http://127.0.0.1:80/testKey/banned/100\": dial tcp 127.0.0.1:80: connectex: No connection could be made because the target machine actively refused it."),
+				err: fmt.Errorf("Query Error: Get \"http://127.0.0.1:80/testKey/banned/100\": dial tcp 127.0.0.1:80: connect: connection refused"),
 			},
 		},
 		"nothing returned": {
 			input: mockInput{
 				key: "returnNothing",
 			},
-			expected: mockOutput{
-				err: fmt.Errorf("failed to decode server response: EOF"),
-			},
+			expected: mockOutput{},
 		},
 		"no id returned": {
 			input: mockInput{
@@ -232,7 +258,7 @@ func TestBanned(t *testing.T) {
 				key: "badAuth",
 			},
 			expected: mockOutput{
-				err: fmt.Errorf("client error (401) from apiban.org: 401 Unauthorized from \"%s/badAuth/banned/100\"", testServer.URL),
+				err: fmt.Errorf("client error (401): 401 Unauthorized from \"%s/badAuth/banned/100\"", testServer.URL),
 			},
 		},
 	}
@@ -245,7 +271,7 @@ func TestBanned(t *testing.T) {
 			}
 
 			// Act
-			result, err := Banned(tc.input.key, tc.input.startFrom)
+			result, err := Banned(tc.input.key, tc.input.startFrom, RootURL)
 
 			// Assert
 			assert.Equal(t, tc.expected.data, result)
@@ -343,7 +369,7 @@ func TestCheck(t *testing.T) {
 				ip:  "1.2.3.251",
 			},
 			expected: mockOutput{
-				err: fmt.Errorf("client error (404) from apiban.org: 404 Not Found from \"%s/badKey/check/1.2.3.251\"", testServer.URL),
+				err: fmt.Errorf("client error (404): 404 Not Found from \"%s/badKey/check/1.2.3.251\"", testServer.URL),
 			},
 		},
 		"simulate rate limiter": {
@@ -352,7 +378,7 @@ func TestCheck(t *testing.T) {
 				ip:  "1.2.3.251",
 			},
 			expected: mockOutput{
-				err: fmt.Errorf("client error (429) from apiban.org: 429 Too Many Requests from \"%s/testRateLimit/check/1.2.3.251\"", testServer.URL),
+				err: fmt.Errorf("rate limit reached (429): 429 Too Many Requests from \"%s/testRateLimit/check/1.2.3.251\"", testServer.URL),
 			},
 		},
 		"simulate unknown": {
@@ -361,7 +387,7 @@ func TestCheck(t *testing.T) {
 				ip:  "1.2.3.251",
 			},
 			expected: mockOutput{
-				err: fmt.Errorf("client error (429) from apiban.org: 429 Too Many Requests from \"%s/testUnknown/check/1.2.3.251\"", testServer.URL),
+				err: fmt.Errorf("rate limit reached (429): 429 Too Many Requests from \"%s/testUnknown/check/1.2.3.251\"", testServer.URL),
 			},
 		},
 	}
@@ -379,6 +405,84 @@ func TestCheck(t *testing.T) {
 			// Assert
 			assert.Equal(t, tc.expected.data, result)
 			assert.Equal(t, tc.expected.err, err)
+		})
+	}
+}
+
+func TestProcessAnswer(t *testing.T) {
+	testCases := map[string]struct {
+		input    string
+		expected Entry
+	}{
+		"full json": {
+			input: `{
+					  "metadata": {
+						"Generatedat": 1615323523,
+						"Generatedby": "IntuitiveLabs",
+						"Timestampsince": 0,
+						"Version": "2",
+						"Count": 475,
+						"ScannedCount": 475,
+						"forUser": "",
+						"dynamoParams": {
+						  "TableName": "jk31-IPBlacklist-2NN1KEEBFSZ9",
+						  "ProjectionExpression": "IP, #cnt, #exc, #ts, #ua, #enc",
+						  "ExpressionAttributeValues": {
+							":start_ts": 0
+						  },
+						  "ExpressionAttributeNames": {
+							"#cnt": "count",
+							"#exc": "exceeded",
+							"#ts": "timestamp",
+							"#ua": "fromua",
+							"#enc": "encrypt"
+						  },
+						  "FilterExpression": "#ts > :start_ts"
+						},
+						"top": 0,
+						"requestType": "scan"
+					  },
+					  "ipaddress": [
+						{
+						  "IP": "34.97.192.79",
+                          "fromua": "friendly-scanner",
+						  "exceeded": "honeynet",
+						  "count": 3,
+						  "timestamp": 1615275032
+						}
+					   ],
+					   "ID": "200"
+					}`,
+			expected: Entry{
+				ID: "200",
+				IPs: []IPMap{
+					{
+						"IP":        "34.97.192.79",
+						"count":     3,
+						"timestamp": 1.615275032e+09,
+						"fromua":    "friendly-scanner",
+						"exceeded":  "honeynet",
+					},
+				},
+			},
+		},
+	}
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			if entry, err := processAnswer(strings.NewReader(tc.input)); err != nil {
+				t.Fatalf("could not decode JSON")
+			} else {
+				if tc.expected.ID != entry.ID {
+					t.Fatalf("expected: %v decoded: %v", tc.expected.ID, entry.ID)
+				} else if len(tc.expected.IPs) != len(entry.IPs) {
+					t.Fatalf("expected: %v decoded: %v", tc.expected.IPs, entry.IPs)
+				}
+				for i := 0; i < len(tc.expected.IPs); i++ {
+					if tc.expected.IPs[i]["IP"] != entry.IPs[0]["IP"] {
+						t.Fatalf("expected: %v decoded: %v", tc.expected.ID, entry.ID)
+					}
+				}
+			}
 		})
 	}
 }
