@@ -38,7 +38,7 @@ import (
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/intuitivelabs/anonymization"
-	"github.com/vladabroz/apiban/clients/go/apiban"
+	"github.com/intuitivelabs/apiban/clients/go/apiban"
 	"github.com/vladabroz/go-ipset/ipset"
 )
 
@@ -270,7 +270,6 @@ func run(ctx context.Context, blset ipset.IPSet, apiconfig ApibanConfig) error {
 		log.Print("Invalid interval format")
 		return err
 	}
-	encryptionOn := len(apiconfig.PASSPHRASE) > 0
 
 	for {
 		select {
@@ -280,75 +279,10 @@ func run(ctx context.Context, blset ipset.IPSet, apiconfig ApibanConfig) error {
 			res, err := apiban.Banned(apiconfig.APIKEY, apiconfig.LKID, apiconfig.URL)
 			if err != nil {
 				log.Println("failed to get banned list:", err)
+			} else if res == nil {
+				log.Println("response with empty body")
 			} else {
-				if res.ID == apiconfig.LKID || len(res.IPs) == 0 {
-					//log.Print("Great news... no new bans to add. Exiting...")
-					log.Print("No new bans to add...")
-					//os.Exit(0)
-				}
-
-				/*
-					if len(res.IPs) == 0 {
-						//log.Print("No IP addresses detected. Exiting.")
-						log.Print("No new IP addresses detected...")
-					}
-				*/
-
-				for _, s := range res.IPs {
-					/*
-						//BUG in ipset library? Test method does not seem to work properly - returns;  Failed to test ipset list entry-error testing entry 184.159.238.21: exit status 1 (184.159.238.21 is NOT in set blacklist.
-						log.Print("Working on entry", s)
-						exists, erro := blset.Test(s)
-						if exists == false {
-							log.Print("Failed to test ipset list entry-", erro)
-						}
-						if exists == true {
-							log.Print("Entry already existing...")
-							continue
-						}
-						if exists == false {
-							log.Print("Entry NOT existing...")
-						}
-					*/
-					// check if the "IP" field is present
-					ip, ok := s["IP"]
-					if !ok {
-						continue
-					}
-					// check the string type for the "IP" field
-					ipStr, ok := ip.(string)
-					if !ok {
-						continue
-					}
-					// check if "encrypt" field is present
-					if kvCode, ok := s["encrypt"]; ok {
-						// check the string type for "encrypt" field
-						kvCodeStr, ok := kvCode.(string)
-						if !ok {
-							continue
-						}
-						if !encryptionOn {
-							log.Print("IP encrypted but no passphrase configured")
-							continue
-						}
-						if !validator.Validate(kvCodeStr) {
-							log.Print("IP encrypted but wrong passphrase configured")
-							continue
-						}
-						ipStr = ipcipher.(*anonymization.Ipcipher).DecryptStr(ipStr)
-					}
-					err := blset.Add(ip.(string), 0)
-					if err != nil {
-						log.Print("Adding IP to ipset failed. ", err.Error())
-					} else {
-						log.Print("Processing IP: ", ip)
-					}
-				}
-				// Update the config with the updated LKID
-				apiconfig.LKID = res.ID
-				if err := apiconfig.Update(); err != nil {
-					log.Println(err)
-				}
+				apiban.ProcBannedResponse(*res, apiconfig.LKID, validator, ipcipher, blset)
 			}
 		}
 	}
