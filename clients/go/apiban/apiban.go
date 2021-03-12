@@ -23,12 +23,17 @@ package apiban
 
 import (
 	"bytes"
+	"crypto/cipher"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+
+	"github.com/intuitivelabs/anonymization"
+	"github.com/vladabroz/go-ipset/ipset"
 )
 
 var (
@@ -109,6 +114,80 @@ func Banned(key string, startFrom string, url string) (*Entry, error) {
 		// Aggregate the received IPs
 		out.IPs = append(out.IPs, e.IPs...)
 	}
+}
+
+// ProceBannedResponse processes the response returned by the GET(banned) API
+func ProcBannedResponse(entry Entry, id string, validator anonymization.Validator, ipcipher cipher.Block, blset ipset.IPSet) {
+	if entry.ID == id || len(entry.IPs) == 0 {
+		//log.Print("Great news... no new bans to add. Exiting...")
+		log.Print("No new bans to add...")
+		//os.Exit(0)
+	}
+
+	/*
+		if len(entry.IPs) == 0 {
+			//log.Print("No IP addresses detected. Exiting.")
+			log.Print("No new IP addresses detected...")
+		}
+	*/
+
+	for _, s := range entry.IPs {
+		/*
+			//BUG in ipset library? Test method does not seem to work properly - returns;  Failed to test ipset list entry-error testing entry 184.159.238.21: exit status 1 (184.159.238.21 is NOT in set blacklist.
+			log.Print("Working on entry", s)
+			exists, erro := blset.Test(s)
+			if exists == false {
+				log.Print("Failed to test ipset list entry-", erro)
+			}
+			if exists == true {
+				log.Print("Entry already existing...")
+				continue
+			}
+			if exists == false {
+				log.Print("Entry NOT existing...")
+			}
+		*/
+		// check if the "IP" field is present
+		ip, ok := s["IP"]
+		if !ok {
+			continue
+		}
+		// check the string type for the "IP" field
+		ipStr, ok := ip.(string)
+		if !ok {
+			continue
+		}
+		// check if "encrypt" field is present
+		if kvCode, ok := s["encrypt"]; ok {
+			// check the string type for "encrypt" field
+			kvCodeStr, ok := kvCode.(string)
+			if !ok {
+				continue
+			}
+			if (validator == nil) || (ipcipher == nil) {
+				log.Print("IP encrypted but no passphrase configured")
+				continue
+			}
+			if !validator.Validate(kvCodeStr) {
+				log.Print("IP encrypted but wrong passphrase configured")
+				continue
+			}
+			ipStr = ipcipher.(*anonymization.Ipcipher).DecryptStr(ipStr)
+		}
+		err := blset.Add(ip.(string), 0)
+		if err != nil {
+			log.Print("Adding IP to ipset failed. ", err.Error())
+		} else {
+			log.Print("Processing IP: ", ip)
+		}
+	}
+	/*
+		// Update the config with the updated LKID
+		apiconfig.LKID = entry.ID
+		if err := apiconfig.Update(); err != nil {
+			log.Println(err)
+		}
+	*/
 }
 
 // Check queries APIBAN.org to see if the provided IP address is blocked.
