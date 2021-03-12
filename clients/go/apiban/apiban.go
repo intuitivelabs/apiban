@@ -50,7 +50,7 @@ type IPMap map[string]interface{}
 // Entry describes a set of blocked IP addresses from APIBAN.org
 type Entry struct {
 	// omit Meta when decoding
-	Meta interface{} `json:"-"`
+	Metadata interface{} `json:"-"`
 
 	// ID is the timestamp of the next Entry
 	ID string `json:"ID"`
@@ -88,13 +88,19 @@ func Banned(key string, startFrom string, url string) (*Entry, error) {
 			return nil, err
 		}
 
-		if e.ID == "none" || len(e.IPs) == 0 {
-			// List complete
-			return out, nil
+		// empty body
+		if e == nil {
+			return nil, nil
 		}
+
 		if e.ID == "" {
 			fmt.Println("e.ID empty")
 			return nil, errors.New("empty ID received")
+		}
+
+		if e.ID == "none" || len(e.IPs) == 0 {
+			// List complete
+			return out, nil
 		}
 
 		// Set the next ID
@@ -135,6 +141,14 @@ func Check(key string, ip string) (bool, error) {
 	return true, nil
 }
 
+func processAnswer(msg io.Reader) (*Entry, error) {
+	entry := new(Entry)
+	if err := json.NewDecoder(msg).Decode(entry); err != nil {
+		return nil, err
+	}
+	return entry, nil
+}
+
 func queryServer(c *http.Client, u string) (*Entry, error) {
 	//resp, err := http.Get(u)
 	resp, err := c.Get(u)
@@ -161,11 +175,13 @@ func queryServer(c *http.Client, u string) (*Entry, error) {
 		return nil, fmt.Errorf("unhandled error (%d): %s from %q", resp.StatusCode, resp.Status, u)
 	}
 
-	entry := new(Entry)
-	if err = json.NewDecoder(resp.Body).Decode(entry); err != nil {
+	if resp.ContentLength == 0 {
+		return nil, nil
+	}
+	var entry *Entry
+	if entry, err = processAnswer(resp.Body); err != nil {
 		return nil, fmt.Errorf("failed to decode server response: %s", err.Error())
 	}
-
 	//fmt.Println("entry from queryServer", entry)
 	return entry, nil
 }
