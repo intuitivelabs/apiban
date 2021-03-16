@@ -32,13 +32,16 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/signal"
 	"reflect"
 	"runtime"
+	"runtime/pprof"
+	"syscall"
 	"time"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/intuitivelabs/anonymization"
-	"github.com/intuitivelabs/apiban/clients/go/apiban"
+	//"github.com/intuitivelabs/apiban/clients/go/apiban"
 	"github.com/vladabroz/go-ipset/ipset"
 )
 
@@ -50,6 +53,11 @@ var interval int
 var full string
 var ipcipher cipher.Block
 var validator anonymization.Validator
+var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+
+const (
+	defaultId = "0"
+)
 
 func init() {
 	flag.StringVar(&chain, "chain", "BLOCKER", "chain for matching entries")
@@ -147,6 +155,29 @@ func main() {
 
 	//	defer os.Exit(0)
 
+	if *cpuprofile != "" {
+		f, err := os.Create(*cpuprofile)
+		if err != nil {
+			log.Fatal(err)
+		}
+		defer f.Close()
+		runtime.SetCPUProfileRate(1000000)
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+		c := make(chan os.Signal, 2)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM) // subscribe to system signals
+		signal.Notify(c, os.Interrupt, syscall.SIGINT)  // subscribe to system signals
+		onKill := func(c chan os.Signal) {
+			select {
+			case <-c:
+				defer f.Close()
+				defer pprof.StopCPUProfile()
+				defer os.Exit(0)
+			}
+		}
+		// try to handle os interrupt(signal terminated)
+		go onKill(c)
+	}
 	// Open our Log
 	if logFile != "-" && logFile != "stdout" {
 		lf, err := os.OpenFile("/var/log/apiban-ipsets.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
@@ -181,7 +212,7 @@ func main() {
 		arg1 := os.Args[1]
 		if arg1 == "FULL" {
 			log.Print("CLI of FULL received, resetting LKID")
-			apiconfig.LKID = "100"
+			apiconfig.LKID = defaultId //"100"
 		}
 	} else {
 		log.Print("no command line arguments received")
@@ -190,13 +221,13 @@ func main() {
 	// reset LKID to 100 if specified in config file
 	if apiconfig.FULL == "yes" {
 		log.Print("FULL=yes in config file, resetting LKID")
-		apiconfig.LKID = "100"
+		apiconfig.LKID = defaultId //"100"
 	}
 
 	// if no LKID, reset it to 100
 	if len(apiconfig.LKID) == 0 {
 		log.Print("Resetting LKID")
-		apiconfig.LKID = "100"
+		apiconfig.LKID = defaultId // "100"
 	} else {
 		log.Print("LKID:", apiconfig.LKID)
 	}
@@ -220,17 +251,18 @@ func main() {
 		}
 	}
 	// Go connect for IPTABLES
-	ipt, err := iptables.New()
+	/*ipt, err := iptables.New()
 	if err != nil {
 		log.Panic(err)
-	}
+	}*/
 
 	//	if err := initializeIPTables(ipt); err != nil {
 	//		log.Fatalln("failed to initialize IPTables:", err)
 	//	}
 
 	fmt.Println("Creating ipset...")
-	blset, err := initializeIPTables(ipt, apiconfig.CHAIN)
+	//blset, err := initializeIPTables(ipt, apiconfig.CHAIN)
+	blset := &ipset.IPSet{}
 
 	if err != nil {
 		log.Fatalln("failed to initialize iptables and ipsets", err)
@@ -238,7 +270,7 @@ func main() {
 
 	//if iptinit == "chain created" {
 	//	log.Print("APIBAN chain was created - Resetting LKID")
-	//	apiconfig.LKID = "100"
+	//	apiconfig.LKID = defaultId
 	//}
 
 	///	// Creating ipset "blacklist"
@@ -261,6 +293,7 @@ func main() {
 
 func run(ctx context.Context, blset ipset.IPSet, apiconfig ApibanConfig) error {
 
+	//var id string = apiconfig.LKID
 	// Get list of banned ip's from APIBAN.org
 	fmt.Println("APIKEY", apiconfig.APIKEY)
 	fmt.Println("URL", apiconfig.URL)
@@ -271,19 +304,34 @@ func run(ctx context.Context, blset ipset.IPSet, apiconfig ApibanConfig) error {
 		return err
 	}
 
-	for {
+	// start right away
+	selectTimeout := time.Duration(1 * time.Nanosecond)
+	for ticker := time.NewTicker(selectTimeout); ; {
+		t := time.Time(time.Now())
+		log.Println("ticker: ", t)
 		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.Tick(interval):
-			res, err := apiban.Banned(apiconfig.APIKEY, apiconfig.LKID, apiconfig.URL)
-			if err != nil {
-				log.Println("failed to get banned list:", err)
-			} else if res == nil {
-				log.Println("response with empty body")
-			} else {
-				apiban.ProcBannedResponse(*res, apiconfig.LKID, validator, ipcipher, blset)
+		/*
+			case <-ctx.Done():
+				return nil
+		*/
+		case t = <-ticker.C:
+			// change the timeout to the one in the configuration
+			log.Println("ticker:", t)
+			if selectTimeout != interval {
+				selectTimeout = interval
+				ticker = time.NewTicker(selectTimeout)
 			}
+			/*
+				res, err := apiban.Banned(apiconfig.APIKEY, id, apiconfig.URL)
+				if err != nil {
+					log.Println("failed to get banned list:", err)
+				} else if res == nil {
+					log.Println("response with empty body")
+				} else {
+					apiban.ProcBannedResponse(res, apiconfig.LKID, validator, ipcipher, blset)
+					id = res.ID
+				}
+			*/
 		}
 	}
 }

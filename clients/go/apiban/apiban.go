@@ -52,6 +52,13 @@ var IPMapKeys = [...]string{"IP", "fromua", "encrypt", "exceeded", "count", "tim
 
 type IPMap map[string]interface{}
 
+// use insecure if configured - TESTING PURPOSES ONLY!
+var transCfg = &http.Transport{
+	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+}
+
+var httpClient = &http.Client{Transport: transCfg}
+
 // Entry describes a set of blocked IP addresses from APIBAN.org
 type Entry struct {
 	// omit Meta when decoding
@@ -80,15 +87,9 @@ func Banned(key string, startFrom string, url string) (*Entry, error) {
 		ID: startFrom,
 	}
 
-	// use insecure if configured - TESTING PURPOSES ONLY!
-	transCfg := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-	client := &http.Client{Transport: transCfg}
-
 	for {
 		//e, err := queryServer(http.DefaultClient, fmt.Sprintf("%s%s/banned/%s", url, key, out.ID))
-		e, err := queryServer(client, fmt.Sprintf("%s%s/banned/%s", url, key, out.ID))
+		e, err := queryServer(httpClient, fmt.Sprintf("%s%s/banned/%s?version=2", url, key, out.ID))
 		if err != nil {
 			return nil, err
 		}
@@ -117,7 +118,7 @@ func Banned(key string, startFrom string, url string) (*Entry, error) {
 }
 
 // ProceBannedResponse processes the response returned by the GET(banned) API
-func ProcBannedResponse(entry Entry, id string, validator anonymization.Validator, ipcipher cipher.Block, blset ipset.IPSet) {
+func ProcBannedResponse(entry *Entry, id string, validator anonymization.Validator, ipcipher cipher.Block, blset ipset.IPSet) {
 	if entry.ID == id || len(entry.IPs) == 0 {
 		//log.Print("Great news... no new bans to add. Exiting...")
 		log.Print("No new bans to add...")
@@ -174,12 +175,12 @@ func ProcBannedResponse(entry Entry, id string, validator anonymization.Validato
 			}
 			ipStr = ipcipher.(*anonymization.Ipcipher).DecryptStr(ipStr)
 		}
-		err := blset.Add(ip.(string), 0)
+		/*err := blset.Add(ip.(string), 0)
 		if err != nil {
 			log.Print("Adding IP to ipset failed. ", err.Error())
 		} else {
 			log.Print("Processing IP: ", ip)
-		}
+		}*/
 	}
 	/*
 		// Update the config with the updated LKID
