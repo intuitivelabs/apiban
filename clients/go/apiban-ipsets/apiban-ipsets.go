@@ -23,37 +23,42 @@ package main
 
 import (
 	"context"
-	"crypto/cipher"
-	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/exec"
 	"os/signal"
 	"reflect"
 	"runtime"
-	"runtime/pprof"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/intuitivelabs/anonymization"
-	//"github.com/intuitivelabs/apiban/clients/go/apiban"
+	"github.com/intuitivelabs/apiban/clients/go/apiban"
 	"github.com/vladabroz/go-ipset/ipset"
 )
 
-var configFileLocation string
-var logFile string
-var url string
-var chain string
-var interval int
-var full string
-var ipcipher cipher.Block
-var validator anonymization.Validator
-var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+var (
+	configFilename string
+	logFilename    string
+	url            string
+	chain          string
+	interval       int
+	full           string
+)
+
+// profiler
+var (
+	isProfilerOn = true
+	wg           sync.WaitGroup
+)
 
 const (
 	defaultId = "0"
@@ -61,27 +66,12 @@ const (
 
 func init() {
 	flag.StringVar(&chain, "chain", "BLOCKER", "chain for matching entries")
-	flag.StringVar(&configFileLocation, "config", "", "location of configuration file")
-	flag.StringVar(&logFile, "log", "/var/log/apiban-ipsets.log", "location of log file or - for stdout")
+	flag.StringVar(&configFilename, "config", "", "location of configuration file")
+	flag.StringVar(&logFilename, "log", "/var/log/apiban-ipsets.log", "location of log file or - for stdout")
 	flag.StringVar(&url, "url", "https://siem.intuitivelabs.com/api/", "URL of blacklisted IPs DB")
 	flag.IntVar(&interval, "interval", 60, "interval in seconds for the list refresh")
 	flag.StringVar(&full, "full", "no", "yes/no - starting from scratch")
 	//flag.StringVar(&url, "url", "https://latewed-alb-11jg2pxd7j3ue-835913326.eu-west-1.elb.amazonaws.com/stats?table=ipblacklist&json", "URL of blacklisted IPs DB")
-}
-
-// ApibanConfig is the structure for the JSON config file
-type ApibanConfig struct {
-	APIKEY  string `json:"APIKEY"`
-	LKID    string `json:"LKID"`
-	VERSION string `json:"VERSION"`
-	URL     string `json:"URL"`
-	CHAIN   string `json:"CHAIN"`
-	TICK    string `json:"INTERVAL"`
-	FULL    string `json:"FULL"`
-	// passphrase used to generate encryption key for anonymization
-	PASSPHRASE string `json:"PASSPHRASE"`
-
-	sourceFile string
 }
 
 // Function to see if string within string
@@ -143,6 +133,42 @@ func checkIPSet(ipsetname string) (bool, error) {
 	return false, nil
 }
 
+func startProfiler(isOn bool) {
+	if isOn {
+		wg.Add(1)
+		go func() {
+			log.Printf("Starting Server! \t Go to http://localhost:6060/debug/pprof/\n")
+			err := http.ListenAndServe("localhost:6060", nil)
+			if err != nil {
+				log.Printf("Failed to start the server! Error: %v", err)
+				wg.Done()
+			}
+		}()
+	}
+}
+
+func signalHandler(sig os.Signal) {
+	switch sig {
+	case syscall.SIGINT:
+		fallthrough
+	case syscall.SIGKILL:
+		fallthrough
+	case syscall.SIGTERM:
+		if err := apiban.GetState().SaveToFile(); err != nil {
+			log.Println(err)
+		}
+		os.Exit(1)
+	default:
+		// no processing
+	}
+}
+
+func installSignalHandler() chan os.Signal {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGINT, syscall.SIGKILL, syscall.SIGTERM)
+	return c
+}
+
 func main() {
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
@@ -155,31 +181,12 @@ func main() {
 
 	//	defer os.Exit(0)
 
-	if *cpuprofile != "" {
-		f, err := os.Create(*cpuprofile)
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer f.Close()
-		runtime.SetCPUProfileRate(1000000)
-		pprof.StartCPUProfile(f)
-		defer pprof.StopCPUProfile()
-		c := make(chan os.Signal, 2)
-		signal.Notify(c, os.Interrupt, syscall.SIGTERM) // subscribe to system signals
-		signal.Notify(c, os.Interrupt, syscall.SIGINT)  // subscribe to system signals
-		onKill := func(c chan os.Signal) {
-			select {
-			case <-c:
-				defer f.Close()
-				defer pprof.StopCPUProfile()
-				defer os.Exit(0)
-			}
-		}
-		// try to handle os interrupt(signal terminated)
-		go onKill(c)
-	}
+	startProfiler(isProfilerOn)
+
+	sigChan := installSignalHandler()
+
 	// Open our Log
-	if logFile != "-" && logFile != "stdout" {
+	if logFilename != "-" && logFilename != "stdout" {
 		lf, err := os.OpenFile("/var/log/apiban-ipsets.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
 			log.Panic(err)
@@ -195,13 +202,13 @@ func main() {
 	log.Print("Licensed under GPLv2. See LICENSE for details.")
 
 	// Open our config file
-	apiconfig, err := LoadConfig()
+	apiconfig, err := apiban.LoadConfig(configFilename)
 	if err != nil {
 		log.Fatalln(err)
 	}
 
 	// if no APIKEY, exit
-	if apiconfig.APIKEY == "" {
+	if apiconfig.Apikey == "" {
 		log.Fatalln("Invalid APIKEY. Exiting.")
 	}
 	// log config values
@@ -212,57 +219,63 @@ func main() {
 		arg1 := os.Args[1]
 		if arg1 == "FULL" {
 			log.Print("CLI of FULL received, resetting LKID")
-			apiconfig.LKID = defaultId //"100"
+			apiconfig.Lkid = defaultId //"100"
 		}
 	} else {
 		log.Print("no command line arguments received")
 	}
 
 	// reset LKID to 100 if specified in config file
-	if apiconfig.FULL == "yes" {
+	if apiconfig.Full == "yes" {
 		log.Print("FULL=yes in config file, resetting LKID")
-		apiconfig.LKID = defaultId //"100"
+		apiconfig.Lkid = defaultId //"100"
 	}
 
 	// if no LKID, reset it to 100
-	if len(apiconfig.LKID) == 0 {
+	if len(apiconfig.Lkid) == 0 {
 		log.Print("Resetting LKID")
-		apiconfig.LKID = defaultId // "100"
+		apiconfig.Lkid = defaultId // "100"
 	} else {
-		log.Print("LKID:", apiconfig.LKID)
+		log.Print("LKID:", apiconfig.Lkid)
 	}
 
 	// use default
-	if len(apiconfig.CHAIN) == 0 {
-		apiconfig.CHAIN = "BLOCKER"
+	if len(apiconfig.Chain) == 0 {
+		apiconfig.Chain = "BLOCKER"
 	}
-	log.Print("Chain:", apiconfig.CHAIN)
+	log.Print("Chain:", apiconfig.Chain)
 
-	log.Print("Interval for checking the list:", apiconfig.TICK)
+	log.Print("Interval for checking the list:", apiconfig.Tick)
+
+	if apiconfig.StateFilename != "" {
+		apiban.GetState().Init(apiconfig.StateFilename)
+	}
+	if err := apiban.GetState().LoadFromFile(); err != nil {
+		log.Println(err)
+	}
 
 	// generate encryption key from passphrase
-	if len(apiconfig.PASSPHRASE) > 0 {
-		if ipcipher, err = anonymization.NewPassphraseCipher(apiconfig.PASSPHRASE); err != nil {
+	if len(apiconfig.Passphrase) > 0 {
+		if apiban.Ipcipher, err = anonymization.NewPassphraseCipher(apiconfig.Passphrase); err != nil {
 			log.Fatalln("Cannot initialize ipcipher. Exiting.")
 		}
 		// initialize a validator using the configured passphrase; neither length nor salt are used since this validator verifies only the remote code
-		if validator, err = anonymization.NewPassphraseValidator(apiconfig.PASSPHRASE, 0 /*length*/, "" /*salt*/); err != nil {
+		if apiban.Validator, err = anonymization.NewPassphraseValidator(apiconfig.Passphrase, 0 /*length*/, "" /*salt*/); err != nil {
 			log.Fatalln("Cannot initialize validator. Exiting.")
 		}
 	}
 	// Go connect for IPTABLES
-	/*ipt, err := iptables.New()
+	ipt, err := iptables.New()
 	if err != nil {
 		log.Panic(err)
-	}*/
+	}
 
 	//	if err := initializeIPTables(ipt); err != nil {
 	//		log.Fatalln("failed to initialize IPTables:", err)
 	//	}
 
 	fmt.Println("Creating ipset...")
-	//blset, err := initializeIPTables(ipt, apiconfig.CHAIN)
-	blset := &ipset.IPSet{}
+	blset, err := initializeIPTables(ipt, apiconfig.Chain)
 
 	if err != nil {
 		log.Fatalln("failed to initialize iptables and ipsets", err)
@@ -270,7 +283,7 @@ func main() {
 
 	//if iptinit == "chain created" {
 	//	log.Print("APIBAN chain was created - Resetting LKID")
-	//	apiconfig.LKID = defaultId
+	//	apiconfig.Lkid = defaultId
 	//}
 
 	///	// Creating ipset "blacklist"
@@ -286,27 +299,32 @@ func main() {
 	//}
 	//fmt.Print("Content", content)
 	fmt.Println("going to run in a looop")
-	if err := run(ctx, *blset, *apiconfig); err != nil {
+	if err := run(ctx, *blset, *apiconfig, sigChan); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 	}
+	wg.Wait()
 }
 
-func run(ctx context.Context, blset ipset.IPSet, apiconfig ApibanConfig) error {
+func run(ctx context.Context, blset ipset.IPSet, apiconfig apiban.Config, sigChan chan os.Signal) error {
 
-	//var id string = apiconfig.LKID
+	var id string
+	// use the last timestamp saved in the state file (if non zero)
+	if id = apiban.GetState().Timestamp; id == "" {
+		id = apiconfig.Lkid
+	}
 	// Get list of banned ip's from APIBAN.org
-	fmt.Println("APIKEY", apiconfig.APIKEY)
-	fmt.Println("URL", apiconfig.URL)
-	fmt.Println("TICK", apiconfig.TICK)
-	interval, err := time.ParseDuration(apiconfig.TICK)
+	fmt.Println("APIKEY", apiconfig.Apikey)
+	fmt.Println("URL", apiconfig.Url)
+	fmt.Println("TICK", apiconfig.Tick)
+	interval, err := time.ParseDuration(apiconfig.Tick)
 	if err != nil {
 		log.Print("Invalid interval format")
 		return err
 	}
 
 	// start right away
-	selectTimeout := time.Duration(1 * time.Nanosecond)
-	for ticker := time.NewTicker(selectTimeout); ; {
+	currentTimeout := time.Duration(1 * time.Nanosecond)
+	for ticker := time.NewTicker(currentTimeout); ; {
 		t := time.Time(time.Now())
 		log.Println("ticker: ", t)
 		select {
@@ -314,82 +332,30 @@ func run(ctx context.Context, blset ipset.IPSet, apiconfig ApibanConfig) error {
 			case <-ctx.Done():
 				return nil
 		*/
+		case sig := <-sigChan:
+			signalHandler(sig)
+
 		case t = <-ticker.C:
 			// change the timeout to the one in the configuration
 			log.Println("ticker:", t)
-			if selectTimeout != interval {
-				selectTimeout = interval
-				ticker = time.NewTicker(selectTimeout)
+			res, err := apiban.Banned(apiconfig.Apikey, id, apiconfig.Version, apiconfig.Url)
+			if err != nil {
+				log.Println("failed to get banned list:", err)
+			} else if res == nil {
+				log.Println("response with empty body")
+			} else {
+				apiban.ProcBannedResponse(res, apiconfig.Lkid, blset)
+				id = res.ID
 			}
-			/*
-				res, err := apiban.Banned(apiconfig.APIKEY, id, apiconfig.URL)
-				if err != nil {
-					log.Println("failed to get banned list:", err)
-				} else if res == nil {
-					log.Println("response with empty body")
-				} else {
-					apiban.ProcBannedResponse(res, apiconfig.LKID, validator, ipcipher, blset)
-					id = res.ID
-				}
-			*/
+		}
+		newTimeout := interval
+		if newTimeout != currentTimeout {
+			/* stop the old timer */
+			ticker.Stop()
+			currentTimeout = newTimeout
+			ticker = time.NewTicker(currentTimeout)
 		}
 	}
-}
-
-// LoadConfig attempts to load the APIBAN configuration file from various locations
-func LoadConfig() (*ApibanConfig, error) {
-	var fileLocations []string
-
-	// If we have a user-specified configuration file, use it preferentially
-	if configFileLocation != "" {
-		fileLocations = append(fileLocations, configFileLocation)
-	}
-
-	// If we can determine the user configuration directory, try there
-	configDir, err := os.UserConfigDir()
-	if err == nil {
-		fileLocations = append(fileLocations, fmt.Sprintf("%s/apiban-ipsets/config.json", configDir))
-	}
-
-	// Add standard static locations
-	fileLocations = append(fileLocations,
-		"/etc/apiban-ipsets/config.json",
-		"config.json",
-		"/usr/local/bin/apiban/config.json",
-	)
-
-	for _, loc := range fileLocations {
-		f, err := os.Open(loc)
-		if err != nil {
-			continue
-		}
-		defer f.Close()
-
-		cfg := new(ApibanConfig)
-		if err := json.NewDecoder(f).Decode(cfg); err != nil {
-			return nil, fmt.Errorf("failed to read configuration from %s: %w", loc, err)
-		}
-
-		// Store the location of the config file so that we can update it later
-		cfg.sourceFile = loc
-		fmt.Println("cfg: ", cfg)
-		//fmt.Println("cfg.chain: ", cfg.CHAIN)
-
-		return cfg, nil
-	}
-
-	return nil, errors.New("failed to locate configuration file")
-}
-
-// Update rewrite the configuration file with and updated state (such as the LKID)
-func (cfg *ApibanConfig) Update() error {
-	f, err := os.Create(cfg.sourceFile)
-	if err != nil {
-		return fmt.Errorf("failed to open configuration file for writing: %w", err)
-	}
-	defer f.Close()
-
-	return json.NewEncoder(f).Encode(cfg)
 }
 
 func initializeIPTables(ipt *iptables.IPTables, blChain string) (*ipset.IPSet, error) {

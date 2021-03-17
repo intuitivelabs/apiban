@@ -37,8 +37,14 @@ import (
 )
 
 var (
-	// RootURL is the base URI of the APIBAN.org API server
-	RootURL = "https://apiban.org/api/"
+	// RootURL is the base URI of the intuitive labs server
+	RootURL = "https://siem.intuitivelabs.com/"
+)
+
+// anonymization objects
+var (
+	Ipcipher  cipher.Block
+	Validator anonymization.Validator
 )
 
 // ErrBadRequest indicates a 400 response was received;
@@ -48,10 +54,6 @@ var (
 // Banned)
 var ErrBadRequest = errors.New("Bad Request")
 
-var IPMapKeys = [...]string{"IP", "fromua", "encrypt", "exceeded", "count", "timestamp"}
-
-type IPMap map[string]interface{}
-
 // use insecure if configured - TESTING PURPOSES ONLY!
 var transCfg = &http.Transport{
 	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -59,10 +61,18 @@ var transCfg = &http.Transport{
 
 var httpClient = &http.Client{Transport: transCfg}
 
+var IPMapKeys = [...]string{"IP", "fromua", "encrypt", "exceeded", "count", "timestamp"}
+
+type IPMap map[string]interface{}
+
+var MetadataKeys = [...]string{"defaultBlacklistTtl"}
+
+type MetadataMap map[string]interface{}
+
 // Entry describes a set of blocked IP addresses from APIBAN.org
 type Entry struct {
 	// omit Meta when decoding
-	Metadata interface{} `json:"-"`
+	Metadata MetadataMap `json:"metadata"`
 
 	// ID is the timestamp of the next Entry
 	ID string `json:"ID"`
@@ -74,7 +84,7 @@ type Entry struct {
 // Banned returns a set of banned addresses, optionally limited to the
 // specified startFrom ID.  If no startFrom is supplied, the entire current list will
 // be pulled.
-func Banned(key string, startFrom string, url string) (*Entry, error) {
+func Banned(key string, startFrom string, version string, url string) (*Entry, error) {
 	if key == "" {
 		return nil, errors.New("API Key is required")
 	}
@@ -89,7 +99,9 @@ func Banned(key string, startFrom string, url string) (*Entry, error) {
 
 	for {
 		//e, err := queryServer(http.DefaultClient, fmt.Sprintf("%s%s/banned/%s", url, key, out.ID))
-		e, err := queryServer(httpClient, fmt.Sprintf("%s%s/banned/%s?version=2", url, key, out.ID))
+		url := fmt.Sprintf("%s%s/banned/%s?version=%s", url, key, out.ID, version)
+		log.Println("banned url: ", url)
+		e, err := queryServer(httpClient, url)
 		if err != nil {
 			return nil, err
 		}
@@ -118,20 +130,21 @@ func Banned(key string, startFrom string, url string) (*Entry, error) {
 }
 
 // ProceBannedResponse processes the response returned by the GET(banned) API
-func ProcBannedResponse(entry *Entry, id string, validator anonymization.Validator, ipcipher cipher.Block, blset ipset.IPSet) {
+func ProcBannedResponse(entry *Entry, id string, blset ipset.IPSet) {
 	if entry.ID == id || len(entry.IPs) == 0 {
 		//log.Print("Great news... no new bans to add. Exiting...")
 		log.Print("No new bans to add...")
 		//os.Exit(0)
 	}
 
-	/*
-		if len(entry.IPs) == 0 {
-			//log.Print("No IP addresses detected. Exiting.")
-			log.Print("No new IP addresses detected...")
+	ttl := GetConfig().blTtl
+	if ttl == 0 {
+		// try to get the ttl from the answers metada
+		metaTtl, ok := entry.Metadata["defaultBlacklistTtl"]
+		if ok {
+			ttl, _ = metaTtl.(int)
 		}
-	*/
-
+	}
 	for _, s := range entry.IPs {
 		/*
 			//BUG in ipset library? Test method does not seem to work properly - returns;  Failed to test ipset list entry-error testing entry 184.159.238.21: exit status 1 (184.159.238.21 is NOT in set blacklist.
@@ -165,23 +178,24 @@ func ProcBannedResponse(entry *Entry, id string, validator anonymization.Validat
 			if !ok {
 				continue
 			}
-			if (validator == nil) || (ipcipher == nil) {
+			if (Validator == nil) || (Ipcipher == nil) {
 				log.Print("IP encrypted but no passphrase configured")
 				continue
 			}
-			if !validator.Validate(kvCodeStr) {
+			if !Validator.Validate(kvCodeStr) {
 				log.Print("IP encrypted but wrong passphrase configured")
 				continue
 			}
-			ipStr = ipcipher.(*anonymization.Ipcipher).DecryptStr(ipStr)
+			ipStr = Ipcipher.(*anonymization.Ipcipher).DecryptStr(ipStr)
 		}
-		/*err := blset.Add(ip.(string), 0)
+		err := blset.Add(ip.(string), GetConfig().blTtl)
 		if err != nil {
 			log.Print("Adding IP to ipset failed. ", err.Error())
 		} else {
 			log.Print("Processing IP: ", ip)
-		}*/
+		}
 	}
+	GetState().Timestamp = entry.ID
 	/*
 		// Update the config with the updated LKID
 		apiconfig.LKID = entry.ID
