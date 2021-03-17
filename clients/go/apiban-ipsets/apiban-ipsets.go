@@ -56,7 +56,7 @@ var (
 
 // profiler
 var (
-	isProfilerOn = true
+	isProfilerOn = false
 	wg           sync.WaitGroup
 )
 
