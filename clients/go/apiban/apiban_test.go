@@ -271,7 +271,7 @@ func TestBanned(t *testing.T) {
 			}
 
 			// Act
-			result, err := Banned(tc.input.key, tc.input.startFrom, RootURL)
+			result, err := Banned(tc.input.key, tc.input.startFrom, "2", RootURL)
 
 			// Assert
 			assert.Equal(t, tc.expected.data, result)
