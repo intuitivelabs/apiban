@@ -40,7 +40,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-iptables/iptables"
-	"github.com/intuitivelabs/anonymization"
 	"github.com/intuitivelabs/apiban/clients/go/apiban"
 	"github.com/vladabroz/go-ipset/ipset"
 )
@@ -52,12 +51,13 @@ var (
 	chain          string
 	interval       int
 	full           string
+	useStateFile   = false
 )
 
 // profiler
 var (
-	isProfilerOn = false
-	wg           sync.WaitGroup
+	useProfiler = false
+	wg          sync.WaitGroup
 )
 
 const (
@@ -181,7 +181,7 @@ func main() {
 
 	//	defer os.Exit(0)
 
-	startProfiler(isProfilerOn)
+	startProfiler(useProfiler)
 
 	sigChan := installSignalHandler()
 
@@ -250,20 +250,13 @@ func main() {
 	if apiconfig.StateFilename != "" {
 		apiban.GetState().Init(apiconfig.StateFilename)
 	}
-	if err := apiban.GetState().LoadFromFile(); err != nil {
-		log.Println(err)
+	if useStateFile {
+		if err := apiban.GetState().LoadFromFile(); err != nil {
+			log.Println(err)
+		}
 	}
 
-	// generate encryption key from passphrase
-	if len(apiconfig.Passphrase) > 0 {
-		if apiban.Ipcipher, err = anonymization.NewPassphraseCipher(apiconfig.Passphrase); err != nil {
-			log.Fatalln("Cannot initialize ipcipher. Exiting.")
-		}
-		// initialize a validator using the configured passphrase; neither length nor salt are used since this validator verifies only the remote code
-		if apiban.Validator, err = anonymization.NewPassphraseValidator(apiconfig.Passphrase, 0 /*length*/, "" /*salt*/); err != nil {
-			log.Fatalln("Cannot initialize validator. Exiting.")
-		}
-	}
+	apiban.InitEncryption(apiconfig)
 	// Go connect for IPTABLES
 	ipt, err := iptables.New()
 	if err != nil {
