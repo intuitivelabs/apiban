@@ -1,0 +1,12 @@
+{
+	"APIKEY": "*",
+	"LKID": "0",
+	"VERSION": "2",
+	"URL": "https://siem.intuitivelabs.com/api/",
+	"CHAIN": "BLOCKER",
+	"INTERVAL": "60s",
+	"FULL":"yes",
+    "BLACKLIST_TTL": "24h",
+    "STATE_FILENAME": "/tmp/apiban.state",
+    "PASSPHRASE": "foobar"
+}
