@@ -32,6 +32,8 @@ type Config struct {
 	BlacklistTtl string `json:"BLACKLIST_TTL"`
 	// passphrase used to generate encryption key for anonymization
 	Passphrase string `json:"PASSPHRASE"`
+	// encryption key used for anonymization
+	EncryptionKey string `json:"ENCRYPTION_KEY"`
 
 	// black list ttl translated into seconds
 	blTtl    int
@@ -85,6 +87,10 @@ func LoadConfig(configFilename string) (*Config, error) {
 			return nil, fmt.Errorf("failed to read configuration from %s: %w", loc, err)
 		} else {
 			cfg.blTtl = int(t.Seconds())
+		}
+
+		if len(cfg.Passphrase) != 0 && len(cfg.EncryptionKey) != 0 {
+			return nil, fmt.Errorf("failed to read configuration from %s: both passphrase and encryption key are provided", loc)
 		}
 
 		fmt.Println("cfg: ", cfg)
