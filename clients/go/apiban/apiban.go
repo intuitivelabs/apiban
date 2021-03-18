@@ -97,36 +97,36 @@ func Banned(key string, startFrom string, version string, url string) (*Entry, e
 		ID: startFrom,
 	}
 
-	for {
-		//e, err := queryServer(http.DefaultClient, fmt.Sprintf("%s%s/banned/%s", url, key, out.ID))
-		url := fmt.Sprintf("%s%s/banned/%s?version=%s", url, key, out.ID, version)
-		log.Println("banned url: ", url)
-		e, err := queryServer(httpClient, url)
-		if err != nil {
-			return nil, err
-		}
-
-		// empty body
-		if e == nil {
-			return nil, nil
-		}
-
-		if e.ID == "" {
-			fmt.Println("e.ID empty")
-			return nil, errors.New("empty ID received")
-		}
-
-		if e.ID == "none" || len(e.IPs) == 0 {
-			// List complete
-			return out, nil
-		}
-
-		// Set the next ID
-		out.ID = e.ID
-
-		// Aggregate the received IPs
-		out.IPs = append(out.IPs, e.IPs...)
+	url := fmt.Sprintf("%s%s/banned/%s?version=%s", baseUrl, key, out.ID, version)
+	log.Println("banned url: ", url)
+	e, err := queryServer(httpClient, url)
+	if err != nil {
+		return nil, err
 	}
+
+	// empty body
+	if e == nil {
+		return nil, nil
+	}
+
+	if e.ID == "" {
+		fmt.Println("e.ID empty")
+		return nil, errors.New("empty ID received")
+	}
+
+	if e.ID == "none" || len(e.IPs) == 0 {
+		// do not save the ID
+		return out, nil
+	}
+
+	// Set the next ID and store it as state
+	out.ID = e.ID
+	GetState().Timestamp = e.ID
+
+	// Aggregate the received IPs
+	out.IPs = append(out.IPs, e.IPs...)
+
+	return out, nil
 }
 
 // ProceBannedResponse processes the response returned by the GET(banned) API
