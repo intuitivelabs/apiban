@@ -11,6 +11,10 @@ github.com/intuitivelabs/anonymization v1.0.3-0.20210309173406-481d0eb4c50e h1:s
 github.com/intuitivelabs/anonymization v1.0.3-0.20210309173406-481d0eb4c50e/go.mod h1:IPXLNFwTI7SvKipJ/EcLR8ma/6hDLHyFFagWVkd++gU=
 github.com/intuitivelabs/anonymization v1.0.3-0.20210310001157-58829fda4f1c h1:TkKRWXshMMltaqv7S2b57NyBiOc2lMb/Y0jUXvmMmxU=
 github.com/intuitivelabs/anonymization v1.0.3-0.20210310001157-58829fda4f1c/go.mod h1:IPXLNFwTI7SvKipJ/EcLR8ma/6hDLHyFFagWVkd++gU=
+github.com/intuitivelabs/anonymization v1.0.3-0.20210318192226-ea24387a6b13 h1:zSa4YA5/J5EYwKRQYbmmRgtydbTMLdVsjldWr+Sndn4=
+github.com/intuitivelabs/anonymization v1.0.3-0.20210318192226-ea24387a6b13/go.mod h1:IPXLNFwTI7SvKipJ/EcLR8ma/6hDLHyFFagWVkd++gU=
+github.com/intuitivelabs/anonymization v1.0.3-0.20210318194055-122ed093ead0 h1:s4mo000uGU+OZBBbExDdczgDd7FkU3Rls858FSSTbfI=
+github.com/intuitivelabs/anonymization v1.0.3-0.20210318194055-122ed093ead0/go.mod h1:IPXLNFwTI7SvKipJ/EcLR8ma/6hDLHyFFagWVkd++gU=
 github.com/intuitivelabs/ipcrypt v1.1.0 h1:nLWT//mwecB7JC2/e7XSHasjRetJVqBnOCYrNW6WmQ4=
 github.com/intuitivelabs/ipcrypt v1.1.0/go.mod h1:1Tbk2GMxSflaUSwrQaFnMrg1VvTDM4JO3Jbh7RzPjSs=
 github.com/magefile/mage v1.10.0 h1:3HiXzCUY12kh9bIuyXShaVe529fJfyqoVM42o/uom2g=

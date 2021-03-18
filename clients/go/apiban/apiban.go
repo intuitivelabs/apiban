@@ -24,13 +24,16 @@ package apiban
 import (
 	"bytes"
 	"crypto/cipher"
+	"crypto/subtle"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/intuitivelabs/anonymization"
 	"github.com/vladabroz/go-ipset/ipset"
@@ -81,10 +84,86 @@ type Entry struct {
 	IPs []IPMap `json:"ipaddress"`
 }
 
+func InitEncryption(c *Config) {
+	var err error
+	if c == nil {
+		log.Fatalln("Cannot initialize anonymizer module. Exiting.")
+		return
+	}
+	if len(c.Passphrase) > 0 {
+		// generate encryption key from passphrase
+		if Ipcipher, err = anonymization.NewPassphraseCipher(c.Passphrase); err != nil {
+			log.Fatalln("Cannot initialize ipcipher. Exiting.")
+		}
+		// initialize a validator using the configured passphrase; neither length nor salt are used since this validator verifies only the remote code
+		if Validator, err = anonymization.NewPassphraseValidator(c.Passphrase, 0 /*length*/, "" /*salt*/); err != nil {
+			log.Fatalln("Cannot initialize validator. Exiting.")
+		}
+	} else {
+		// use the configured encryption key
+		var encKey [anonymization.EncryptionKeyLen]byte
+		// copy the configured key into the one used during realtime processing
+		if decoded, err := hex.DecodeString(c.EncryptionKey); err != nil {
+			log.Fatalln("Cannot initialize ipcipher. Exiting.")
+		} else {
+			subtle.ConstantTimeCopy(1, encKey[:], decoded)
+		}
+		if Ipcipher, err := anonymization.NewCipher(encKey[:]); err != nil {
+			log.Fatalln("Cannot initialize ipcipher. Exiting.")
+		} else {
+			Ipcipher = Ipcipher.(*anonymization.Ipcipher)
+		}
+	}
+}
+
+func decryptIp(encrypted string, kvCode interface{}) (decrypted string, ok bool) {
+	// check the string type for "encrypt" field
+	decrypted = ""
+	kvCodeStr, ok := kvCode.(string)
+	if !ok {
+		log.Print("encrypt field broken format")
+		return
+	}
+	if kvCodeStr != "0" {
+		log.Print("key validation code: ", kvCodeStr)
+		split := strings.Split(kvCodeStr, "|")
+		switch len(split) {
+		case 1:
+			// flags are not there; nothing special to do
+		case 2:
+			// flags are present; get the code
+			kvCodeStr = split[1]
+		default:
+			// broken format
+			log.Print("encrypt field broken format")
+			ok = false
+			return
+		}
+		log.Print("key validation code: ", kvCodeStr)
+		if (Validator == nil) || (Ipcipher == nil) {
+			log.Print("IP encrypted but no passphrase configured")
+			ok = false
+			return
+		}
+		if !Validator.Validate(kvCodeStr) {
+			log.Print("IP encrypted but wrong passphrase configured")
+			ok = false
+			return
+		}
+		ok = true
+		decrypted = Ipcipher.(*anonymization.Ipcipher).DecryptStr(encrypted)
+	} else {
+		// not encrypted; passthrough
+		ok = true
+		decrypted = encrypted
+	}
+	return
+}
+
 // Banned returns a set of banned addresses, optionally limited to the
 // specified startFrom ID.  If no startFrom is supplied, the entire current list will
 // be pulled.
-func Banned(key string, startFrom string, version string, url string) (*Entry, error) {
+func Banned(key string, startFrom string, version string, baseUrl string) (*Entry, error) {
 	if key == "" {
 		return nil, errors.New("API Key is required")
 	}
@@ -173,36 +252,19 @@ func ProcBannedResponse(entry *Entry, id string, blset ipset.IPSet) {
 		}
 		// check if "encrypt" field is present
 		if kvCode, ok := s["encrypt"]; ok {
-			// check the string type for "encrypt" field
-			kvCodeStr, ok := kvCode.(string)
+			ipStr, ok = decryptIp(ipStr, kvCode)
 			if !ok {
+				log.Print("encrypt field broken format")
 				continue
 			}
-			if (Validator == nil) || (Ipcipher == nil) {
-				log.Print("IP encrypted but no passphrase configured")
-				continue
-			}
-			if !Validator.Validate(kvCodeStr) {
-				log.Print("IP encrypted but wrong passphrase configured")
-				continue
-			}
-			ipStr = Ipcipher.(*anonymization.Ipcipher).DecryptStr(ipStr)
 		}
-		err := blset.Add(ip.(string), GetConfig().blTtl)
+		err := blset.Add(ipStr, GetConfig().blTtl)
 		if err != nil {
 			log.Print("Adding IP to ipset failed. ", err.Error())
 		} else {
 			log.Print("Processing IP: ", ip)
 		}
 	}
-	GetState().Timestamp = entry.ID
-	/*
-		// Update the config with the updated LKID
-		apiconfig.LKID = entry.ID
-		if err := apiconfig.Update(); err != nil {
-			log.Println(err)
-		}
-	*/
 }
 
 // Check queries APIBAN.org to see if the provided IP address is blocked.

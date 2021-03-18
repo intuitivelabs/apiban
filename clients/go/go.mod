@@ -2,7 +2,7 @@ module github.com/intuitivelabs/apiban/clients/go
 
 go 1.15
 
-replace github.com/intuitivelabs/anonymization => github.com/intuitivelabs/anonymization v1.0.3-0.20210310001157-58829fda4f1c
+replace github.com/intuitivelabs/anonymization => github.com/intuitivelabs/anonymization v1.0.3-0.20210318194055-122ed093ead0
 
 require (
 	github.com/coreos/go-iptables v0.4.5
