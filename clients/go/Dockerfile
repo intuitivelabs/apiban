@@ -21,7 +21,7 @@ COPY . /src
 # app directory in apiban-ipsets
 WORKDIR /src/apiban-ipsets
 
-RUN go build -o /out/apiban-ipsets .
+RUN go build -o /out/apiban-ipsets ./...
 
 ### PKG ###
 FROM goreleaser/nfpm AS package

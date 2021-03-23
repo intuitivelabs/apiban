@@ -23,7 +23,6 @@ package main
 
 import (
 	"context"
-	"encoding/xml"
 	"errors"
 	"flag"
 	"fmt"
@@ -31,15 +30,12 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
-	"os/exec"
 	"os/signal"
-	"reflect"
 	"runtime"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/coreos/go-iptables/iptables"
 	"github.com/intuitivelabs/apiban/clients/go/apiban"
 	"github.com/vladabroz/go-ipset/ipset"
 )
@@ -72,65 +68,6 @@ func init() {
 	flag.IntVar(&interval, "interval", 60, "interval in seconds for the list refresh")
 	flag.StringVar(&full, "full", "no", "yes/no - starting from scratch")
 	//flag.StringVar(&url, "url", "https://latewed-alb-11jg2pxd7j3ue-835913326.eu-west-1.elb.amazonaws.com/stats?table=ipblacklist&json", "URL of blacklisted IPs DB")
-}
-
-// Function to see if string within string
-func contains(list []string, value string) bool {
-	for _, val := range list {
-		if val == value {
-			return true
-		}
-	}
-	return false
-}
-
-func checkIPSet(ipsetname string) (bool, error) {
-	type IPSet struct {
-		XMLName    xml.Name `xml:"ipset"`
-		Name       string   `xml:"name,attr"`
-		Type       string   `xml:"type"`
-		References string   `xml:"references"`
-	}
-	type IPSets struct {
-		XMLName xml.Name `xml:"ipsets"`
-		IPSets  []IPSet  `xml:"ipset"`
-	}
-
-	var ipsets IPSets
-	//cmd := exec.Command("ipset", "list", "-t", "-o", "xml")
-	//ipsets := IPSetOutput{}
-	cmd := exec.Command("ipset", "list", "-t", "-o", "xml")
-	xmlout, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Fatalf("cmd.Run() failed with %s\n", err)
-	}
-	fmt.Printf("combined out:\n%s\n", string(xmlout))
-	// read our opened xmlFile as a byte array.
-	//byteValue, _ := ioutil.ReadAll(xmlFile)
-	fmt.Println("Type of xmlout %s", reflect.TypeOf(xmlout))
-
-	//testxml := xml.Unmarshal(xmlout, &ipsets)
-	if err := xml.Unmarshal(xmlout, &ipsets); err != nil {
-		panic(err)
-	}
-	fmt.Println(ipsets)
-	//fmt.Printf("ipsetnames :\n%s\n", string(ipsets.XMLName))
-	fmt.Printf("ipsetnames :\n%s\n", ipsets.IPSets[1].Name)
-	//testxml := xml.Unmarshal(byteValue, &ipsets)
-	for i := 0; i < len(ipsets.IPSets); i++ {
-		fmt.Println("IPSet Type: " + ipsets.IPSets[i].Type)
-		fmt.Println("IPSet Name: " + ipsets.IPSets[i].Name)
-		if ipsets.IPSets[i].Name == ipsetname {
-			fmt.Println("IPSET ALREADY EXISTING")
-			return true, nil
-		}
-	}
-
-	//out, err := cmd.CombinedOutput()
-	//fmt.Printf("XML :\n%s\n", ipset.Name)
-	//fmt.Printf("testXML :\n%s\n", testxml)
-	//fmt.Printf("ipsetnames :\n%s\n", string(ipsets.Name))
-	return false, nil
 }
 
 func startProfiler(isOn bool) {
@@ -257,18 +194,9 @@ func main() {
 	}
 
 	apiban.InitEncryption(apiconfig)
-	// Go connect for IPTABLES
-	ipt, err := iptables.New()
-	if err != nil {
-		log.Panic(err)
-	}
-
-	//	if err := initializeIPTables(ipt); err != nil {
-	//		log.Fatalln("failed to initialize IPTables:", err)
-	//	}
 
 	fmt.Println("Creating ipset...")
-	blset, err := initializeIPTables(ipt, apiconfig.Chain)
+	blset, err := apiban.InitializeIPTables(apiconfig.Chain)
 
 	if err != nil {
 		log.Fatalln("failed to initialize iptables and ipsets", err)
@@ -349,130 +277,4 @@ func run(ctx context.Context, blset ipset.IPSet, apiconfig apiban.Config, sigCha
 			ticker = time.NewTicker(currentTimeout)
 		}
 	}
-}
-
-func initializeIPTables(ipt *iptables.IPTables, blChain string) (*ipset.IPSet, error) {
-	// Get existing chains from IPTABLES
-	//fmt.Println("chain to be checked: ", blChain)
-	originaListChain, err := ipt.ListChains("filter")
-	if err != nil {
-		//return "error", fmt.Errorf("failed to read iptables: %w", err)
-		return nil, fmt.Errorf("failed to read iptables: %w", err)
-	}
-
-	// Search for INPUT in IPTABLES
-	if !contains(originaListChain, "INPUT") {
-		//return "error", errors.New("iptables does not contain expected INPUT chain")
-		return nil, errors.New("iptables does not contain expected INPUT chain")
-	}
-
-	// Search for FORWARD in IPTABLES
-	if !contains(originaListChain, "FORWARD") {
-		//return "error", errors.New("iptables does not contain expected FORWARD chain")
-		return nil, errors.New("iptables does not contain expected FORWARD chain")
-	}
-
-	// Search for our blacklist chain in IPTABLES
-	if !contains(originaListChain, blChain) {
-		// create chain itsefl
-		log.Print("IPTABLES doesn't contain %s. Creating now...", blChain)
-		err = ipt.ClearChain("filter", blChain)
-		if err != nil {
-			//return "error", fmt.Errorf("failed to clear APIBAN chain: %w", err)
-			return nil, fmt.Errorf("failed to clear APIBAN chain: %w", err)
-		}
-	}
-
-	// Check if target to blocking chain
-	inpExists, err := ipt.Exists("filter", "INPUT", "-j", blChain)
-	if err != nil {
-		//return "error", fmt.Errorf("failed to check rule in INPUT chain: %w", err)
-		return nil, fmt.Errorf("failed to check rule in INPUT chain: %w", err)
-	}
-	// Add blocking chain to INPUT
-	if inpExists == false {
-		log.Print("Adding target to %s into INPUT chain", blChain)
-		err = ipt.Insert("filter", "INPUT", 1, "-j", blChain)
-		if err != nil {
-			//return "error", fmt.Errorf("failed to add blocking target to INPUT chain: %w", err)
-			return nil, fmt.Errorf("failed to add blocking target to INPUT chain: %w", err)
-		}
-	}
-	/*
-		err = ipt.Insert("filter", "INPUT", 1, "-j", blChain)
-		if err != nil {
-			return "error", fmt.Errorf("failed to add APIBAN chain to INPUT chain: %w", err)
-		}
-	*/
-
-	// Check if target to blocking chain
-	fwdExists, err := ipt.Exists("filter", "FORWARD", "-j", blChain)
-	if err != nil {
-		//return "error", fmt.Errorf("failed check rule in FORWARD chain: %w", err)
-		return nil, fmt.Errorf("failed check rule in FORWARD chain: %w", err)
-	}
-	// Add blocking chain to FORWARD
-	if fwdExists == false {
-		log.Print("Adding target to %s into FORWARD chain", blChain)
-		err = ipt.Insert("filter", "FORWARD", 1, "-j", blChain)
-		if err != nil {
-			//return "error", fmt.Errorf("failed to add blocking target to INPUT chain: %w", err)
-			return nil, fmt.Errorf("failed to add blocking target to INPUT chain: %w", err)
-		}
-	}
-
-	// test if ipset is existing
-	//exists, err := checkIPSet("blacklist")
-	//if exists == false {
-	//	// Creating ipset "blacklist"
-	//	//fmt.Println("Creating blacklist")
-	//	make blset, err := ipset.New("blacklist", "hash:ip", &ipset.Params{})
-	//	if err != nil {
-	//		return nil, fmt.Errorf("failed to create blacklist ipset: %w", err)
-	//	}
-	//	fmt.Println("ipset successfully created")
-	//	//return blset, nil
-	//} else {
-	//	//blset := ipset.IPSet{"blacklist", "hash:ip", &ipset.Params{}}
-	//	//blset, err := ipset.Refresh("blacklist", "hash:ip", &ipset.Params{})
-	//	make blset := &ipset.IPSet{"blacklist", "hash:ip", "inet", 1024, 65536, 0}
-	//	fmt.Println("using ipset.IPSet")
-	//	//blset := ipset.Init("blacklist")
-	//	//return blset, fmt.Errorf("failed to create ipset")
-	//	//return blset, nil
-	//	//blset := ipset.Init("blacklist")
-	//}
-
-	/* Does not work...
-	// Check if rule in blocking chain to ipset exists
-	ipsetRuleExists, err := ipt.Exists("filter", blChain, "-m", "set", "--match-set", "blacklist", "src", "-j", "DROP")
-	if err != nil {
-		//return "error", fmt.Errorf("failed check rule for ipset: %w", err)
-		return nil, fmt.Errorf("failed check rule for ipset: %w", err)
-	}
-	*/
-	blset, err := ipset.New("blacklist", "hash:ip", &ipset.Params{})
-	if err != nil {
-		// failed to create ipset - ipset utility missing?
-		//fmt.Println("Error:", err)
-		return nil, fmt.Errorf("failed to create ipset: %w", err)
-	}
-
-	// workaround - flush our CHAIN first
-	err = ipt.ClearChain("filter", blChain)
-	if err != nil {
-		//return "error", fmt.Errorf("failed to add ipset chain to INPUT chain: %w", err)
-		return nil, fmt.Errorf("failed to clean our chain: %w", err)
-	}
-
-	// Add rule to blocking chain to check ipset
-	log.Print("Creating a rule to check our ipset")
-	err = ipt.Insert("filter", blChain, 1, "-m", "set", "--match-set", "blacklist", "src", "-j", "DROP")
-	if err != nil {
-		//return "error", fmt.Errorf("failed to add ipset chain to INPUT chain: %w", err)
-		return nil, fmt.Errorf("failed to add ipset chain to INPUT chain: %w", err)
-	}
-
-	//return "chain created", nil
-	return blset, nil
 }
