@@ -51,13 +51,6 @@ var (
 	Validator anonymization.Validator
 )
 
-// ErrBadRequest indicates a 400 response was received;
-//
-// NOTE: this is used by the server to indicate both that an IP address is not
-// blocked (when calling Check) and that the list is complete (when calling
-// Banned)
-var ErrBadRequest = errors.New("Bad Request")
-
 // use insecure if configured - TESTING PURPOSES ONLY!
 var transCfg = &http.Transport{
 	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
@@ -72,6 +65,20 @@ type IPMap map[string]interface{}
 var MetadataKeys = [...]string{"defaultBlacklistTtl"}
 
 type MetadataMap map[string]interface{}
+
+// errors
+var (
+	// ErrBadRequest indicates a 400 response was received;
+	//
+	// NOTE: this is used by the server to indicate both that an IP address is not
+	// blocked (when calling Check) and that the list is complete (when calling
+	// Banned)
+	ErrBadRequest = errors.New("Bad Request")
+	// encryption errors
+	ErrEncryptFieldNotString = errors.New("encrypt field is not string in JSON")
+	ErrEncryptNoKey          = errors.New("IP encrypted but no passphrase or encryption key configured")
+	ErrEncryptWrongKey       = errors.New("IP encrypted but wrong passphrase or encryption key configured")
+)
 
 // Entry describes a set of blocked IP addresses from APIBAN.org
 type Entry struct {
@@ -115,54 +122,54 @@ func InitEncryption(c *Config) {
 	if Validator, err = anonymization.NewKeyValidator(crypto.SHA256, authKey[:], 5 /*length*/, "" /*salt*/, anonymization.NonceNone, false /*withNonce*/, true /*pre-allocated HMAC*/); err != nil {
 		log.Fatalln("Cannot initialize validator. Exiting.")
 	}
-	if Ipcipher, err := anonymization.NewCipher(encKey[:]); err != nil {
+	if Ipcipher, err = anonymization.NewCipher(encKey[:]); err != nil {
 		log.Fatalln("Cannot initialize ipcipher. Exiting.")
 	} else {
 		Ipcipher = Ipcipher.(*anonymization.Ipcipher)
 	}
 }
 
-func decryptIp(encrypted string, kvCode interface{}) (decrypted string, ok bool) {
+func isPlainTxt(code string) bool {
+	return (code == "0") || (code == "plain")
+}
+
+func decryptIp(encrypted string, kvCode interface{}) (decrypted string, err error) {
 	// check the string type for "encrypt" field
-	decrypted = ""
+	err = nil
+	decrypted = encrypted
 	kvCodeStr, ok := kvCode.(string)
 	if !ok {
-		log.Print("encrypt field broken format")
+		err = ErrEncryptFieldNotString
 		return
 	}
-	if kvCodeStr != "0" {
-		log.Print("key validation code: ", kvCodeStr)
-		split := strings.Split(kvCodeStr, "|")
-		switch len(split) {
-		case 1:
-			// flags are not there; nothing special to do
-		case 2:
-			// flags are present; get the code
-			kvCodeStr = split[1]
-		default:
-			// broken format
-			log.Print("encrypt field broken format")
-			ok = false
-			return
-		}
-		log.Print("key validation code: ", kvCodeStr)
-		if (Validator == nil) || (Ipcipher == nil) {
-			log.Print("IP encrypted but no passphrase configured")
-			ok = false
-			return
-		}
-		if !Validator.Validate(kvCodeStr) {
-			log.Print("IP encrypted but wrong passphrase configured")
-			ok = false
-			return
-		}
-		ok = true
-		decrypted = Ipcipher.(*anonymization.Ipcipher).DecryptStr(encrypted)
-	} else {
+	log.Print("encrypt field: ", kvCodeStr)
+	if isPlainTxt(kvCodeStr) {
 		// not encrypted; passthrough
-		ok = true
-		decrypted = encrypted
+		return
 	}
+	// check if encrypt flags are part of the encrypt field
+	split := strings.Split(kvCodeStr, "|")
+	switch len(split) {
+	case 1:
+		// flags are not there; nothing special to do
+	case 2:
+		// flags are present; get the code
+		kvCodeStr = split[1]
+		log.Print("key validation code: ", kvCodeStr)
+	default:
+		// broken format
+		err = fmt.Errorf("encrypt field unknown format: %s", kvCodeStr)
+		return
+	}
+	if (Validator == nil) || (Ipcipher == nil) {
+		err = ErrEncryptNoKey
+		return
+	}
+	if !Validator.Validate(kvCodeStr) {
+		err = ErrEncryptWrongKey
+		return
+	}
+	decrypted = Ipcipher.(*anonymization.Ipcipher).DecryptStr(encrypted)
 	return
 }
 
@@ -258,9 +265,9 @@ func ProcBannedResponse(entry *Entry, id string, blset ipset.IPSet) {
 		}
 		// check if "encrypt" field is present
 		if kvCode, ok := s["encrypt"]; ok {
-			ipStr, ok = decryptIp(ipStr, kvCode)
-			if !ok {
-				log.Print("encrypt field broken format")
+			var err error
+			if ipStr, err = decryptIp(ipStr, kvCode); err != nil {
+				log.Printf("Error while decrypting ip %s: %s", ipStr, err)
 				continue
 			}
 		}
