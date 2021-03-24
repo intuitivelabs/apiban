@@ -1,0 +1,12 @@
+{
+	"APIKEY": "*",
+	"LKID": "0",
+	"VERSION": "2",
+	"URL": "https://int19.d.intuitivelabs.com/api/",
+	"CHAIN": "BLOCKER",
+	"INTERVAL": "60s",
+	"FULL":"yes",
+    "BLACKLIST_TTL": "24h",
+    "STATE_FILENAME": "/tmp/apiban.state",
+    "ENCRYPTION_KEY": "3f4d71d87a9649ad8d57329c271507c9"
+}
