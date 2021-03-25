@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/intuitivelabs/anonymization"
 )
 
 var (
@@ -91,6 +93,11 @@ func LoadConfig(configFilename string) (*Config, error) {
 
 		if len(cfg.Passphrase) != 0 && len(cfg.EncryptionKey) != 0 {
 			return nil, fmt.Errorf("failed to read configuration from %s: both passphrase and encryption key are provided", loc)
+		}
+		// EncryptionKey must be either empty or contain 32 hex digits
+		if len(cfg.EncryptionKey) != 0 &&
+			len(cfg.EncryptionKey) != (anonymization.EncryptionKeyLen*2) {
+			return nil, fmt.Errorf("failed to read configuration from %s: invalid length for encryption key (when non-empty, encryption key must have a length of 32 hex digits)", loc)
 		}
 
 		fmt.Println("cfg: ", cfg)
