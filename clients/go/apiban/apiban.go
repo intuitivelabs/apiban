@@ -107,7 +107,7 @@ func InitEncryption(c *Config) {
 		anonymization.GenerateKeyFromPassphraseAndCopy(c.Passphrase,
 			anonymization.EncryptionKeyLen, encKey[:])
 		log.Print("encryption key: ", hex.EncodeToString(encKey[:]))
-	} else {
+	} else if len(c.EncryptionKey) > 0 {
 		// use the configured encryption key
 		// copy the configured key into the one used during realtime processing
 		if decoded, err := hex.DecodeString(c.EncryptionKey); err != nil {
