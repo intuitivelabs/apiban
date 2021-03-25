@@ -47,8 +47,8 @@ var (
 
 // anonymization objects
 var (
-	Ipcipher  cipher.Block
-	Validator anonymization.Validator
+	Ipcipher  cipher.Block            = nil
+	Validator anonymization.Validator = nil
 )
 
 // use insecure if configured - TESTING PURPOSES ONLY!
@@ -100,6 +100,10 @@ func InitEncryption(c *Config) {
 	)
 	if c == nil {
 		log.Fatalln("Cannot initialize anonymizer module. Exiting.")
+		return
+	}
+	if len(c.Passphrase) == 0 && len(c.EncryptionKey) == 0 {
+		log.Print("Neither passphrase nor encryption key provided; anonymization module is not initialized.")
 		return
 	}
 	if len(c.Passphrase) > 0 {
