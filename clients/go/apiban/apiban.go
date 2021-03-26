@@ -261,7 +261,7 @@ func ProcBannedResponse(entry *Entry, id string, blset ipset.IPSet) {
 		var err error
 		// try to get the ttl from the answers metada
 		if ttl, err = getTtlFromMetadata(entry.Metadata); err != nil {
-			log.Printf("failed to get blacklist ttl from metadata: %w", err)
+			log.Printf("failed to get blacklist ttl from metadata: %s", err)
 			ttl = 0
 		} else if ttl < 0 {
 			// negative ttl does not make sense
@@ -299,7 +299,7 @@ func ProcBannedResponse(entry *Entry, id string, blset ipset.IPSet) {
 		if kvCode, ok := s["encrypt"]; ok {
 			var err error
 			if ipStr, err = decryptIp(ipStr, kvCode); err != nil {
-				log.Printf("Error while decrypting ip %s: %w", ipStr, err)
+				log.Printf("Error while decrypting ip %s: %s", ipStr, err)
 				continue
 			}
 		}
