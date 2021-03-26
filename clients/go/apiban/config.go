@@ -82,8 +82,10 @@ func LoadConfig(configFilename string) (*Config, error) {
 		// Store the location of the config file so that we can update it later
 		cfg.filename = loc
 
-		// translate configuration parameters if needed
-		if t, err := time.ParseDuration(cfg.BlacklistTtl); err != nil {
+		if len(cfg.BlacklistTtl) == 0 {
+			cfg.blTtl = 0
+		} else if t, err := time.ParseDuration(cfg.BlacklistTtl); err != nil {
+			// translate configuration parameters if needed
 			return nil, fmt.Errorf("failed to read configuration from %s: %w", loc, err)
 		} else if t.Seconds() < 0 {
 			return nil, fmt.Errorf("failed to read configuration from %s: %w", loc, err)
