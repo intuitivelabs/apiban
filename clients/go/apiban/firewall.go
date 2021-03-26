@@ -12,7 +12,8 @@ import (
 )
 
 type IPTables struct {
-	t *iptables.IPTables
+	ipset map[string]*ipset.IPSet
+	t     *iptables.IPTables
 }
 
 var ipTables = &IPTables{}
@@ -66,16 +67,6 @@ func checkIPSet(ipsetname string) (bool, error) {
 	return false, nil
 }
 
-// Function to see if string within string
-func contains(list []string, value string) bool {
-	for _, val := range list {
-		if val == value {
-			return true
-		}
-	}
-	return false
-}
-
 func (ipt *IPTables) AddTarget(table string, chain string, target string) error {
 	// Check if target exists
 	ok, err := ipt.t.Exists(table, chain, "-j", target)
@@ -95,13 +86,58 @@ func (ipt *IPTables) AddTarget(table string, chain string, target string) error 
 	return nil
 }
 
-func (ipt *IPTables) ChainExists(table string, chain string) (bool, error) {
-	return false, nil
+func (ipt *IPTables) ChainExists(table string, chain string) (ok bool, err error) {
+	ok = false
+	err = nil
+	chains, err := ipt.t.ListChains(table)
+	if err != nil {
+		return
+	}
+	for _, val := range chains {
+		if val == chain {
+			ok = true
+		}
+	}
+	return
+}
+
+func (ipt *IPTables) InsertIpsetRule(table string, chain string, set string, accept bool) (ok bool, err error) {
+	ok = false
+	err = nil
+	if s, mapOk := ipt.ipset[set]; !mapOk {
+		// this ipset was not created yet
+		s, err = ipset.New(set, "hash:ip", &ipset.Params{})
+		if err != nil {
+			err = fmt.Errorf(`failed to create ipset "%s": %w`, set, err)
+			return
+		}
+		// store the newly created ipset
+		ipt.ipset[set] = s
+	}
+	// Add rule to blocking chain to check ipset
+	log.Print("Creating a rule to check our ipset")
+	if accept {
+		// use ACCEPT target
+		log.Printf(`exec: "iptables -t %s -I %s 1 -m set --match-set %s src -j ACCEPT"`, table, chain, set)
+		err = ipTables.t.Insert(table, chain, 1, "-m", "set", "--match-set", set, "src", "-j", "ACCEPT")
+	} else {
+		// use DROP target
+		log.Printf(`exec: "iptables -t %s -I %s 1 -m set --match-set %s src -j DROP"`, table, chain, set)
+		err = ipTables.t.Insert(table, chain, 1, "-m", "set", "--match-set", set, "src", "-j", "DROP")
+	}
+	if err != nil {
+		err = fmt.Errorf("failed to add ipset chain to INPUT chain: %w", err)
+		return
+	}
+	ok = true
+	return
 }
 
 func InitializeIPTables(blChain string) (*ipset.IPSet, error) {
 	var err error
+	var blset *ipset.IPSet
 
+	ipTables.ipset = make(map[string]*ipset.IPSet)
 	ipTables.t, err = iptables.New()
 	if err != nil {
 		log.Panic(err)
@@ -128,19 +164,16 @@ func InitializeIPTables(blChain string) (*ipset.IPSet, error) {
 		return nil, err
 	}
 
-	/* Does not work...
-	// Check if rule in blocking chain to ipset exists
-	ipsetRuleExists, err := ipt.Exists("filter", blChain, "-m", "set", "--match-set", "blacklist", "src", "-j", "DROP")
+	// Check if rule in ipset based rule in blocking chain
+	ok, err := ipTables.t.Exists("filter", blChain, "-m", "set", "--match-set", "blacklist", "src", "-j", "DROP")
 	if err != nil {
 		//return "error", fmt.Errorf("failed check rule for ipset: %w", err)
 		return nil, fmt.Errorf("failed check rule for ipset: %w", err)
 	}
-	*/
-	blset, err := ipset.New("blacklist", "hash:ip", &ipset.Params{})
-	if err != nil {
-		// failed to create ipset - ipset utility missing?
-		//fmt.Println("Error:", err)
-		return nil, fmt.Errorf("failed to create ipset: %w", err)
+	if !ok {
+		ipTables.InsertIpsetRule("filter", blChain, "blacklist", false)
+	} else {
+		log.Printf(`"ipset" based "DROP" rule is already present in table:"filter" chain "%s"`, blChain)
 	}
 
 	// workaround - flush our CHAIN first
@@ -148,14 +181,6 @@ func InitializeIPTables(blChain string) (*ipset.IPSet, error) {
 	if err != nil {
 		//return "error", fmt.Errorf("failed to add ipset chain to INPUT chain: %w", err)
 		return nil, fmt.Errorf("failed to clean our chain: %w", err)
-	}
-
-	// Add rule to blocking chain to check ipset
-	log.Print("Creating a rule to check our ipset")
-	err = ipTables.t.Insert("filter", blChain, 1, "-m", "set", "--match-set", "blacklist", "src", "-j", "DROP")
-	if err != nil {
-		//return "error", fmt.Errorf("failed to add ipset chain to INPUT chain: %w", err)
-		return nil, fmt.Errorf("failed to add ipset chain to INPUT chain: %w", err)
 	}
 
 	//return "chain created", nil
