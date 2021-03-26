@@ -23,14 +23,12 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
-	"runtime"
 	"sync"
 	"syscall"
 	"time"
@@ -40,13 +38,7 @@ import (
 )
 
 var (
-	configFilename string
-	logFilename    string
-	url            string
-	chain          string
-	interval       int
-	full           string
-	useStateFile   = false
+	useStateFile = false
 )
 
 // profiler
@@ -60,13 +52,6 @@ const (
 )
 
 func init() {
-	flag.StringVar(&chain, "chain", "BLOCKER", "chain for matching entries")
-	flag.StringVar(&configFilename, "config", "", "location of configuration file")
-	flag.StringVar(&logFilename, "log", "/var/log/apiban-ipsets.log", "location of log file or - for stdout")
-	flag.StringVar(&url, "url", "https://siem.intuitivelabs.com/api/", "URL of blacklisted IPs DB")
-	flag.IntVar(&interval, "interval", 60, "interval in seconds for the list refresh")
-	flag.StringVar(&full, "full", "no", "yes/no - starting from scratch")
-	//flag.StringVar(&url, "url", "https://latewed-alb-11jg2pxd7j3ue-835913326.eu-west-1.elb.amazonaws.com/stats?table=ipblacklist&json", "URL of blacklisted IPs DB")
 }
 
 func startProfiler(isOn bool) {
@@ -109,8 +94,6 @@ func main() {
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
 
-	flag.Parse()
-
 	defer func() {
 		cancel()
 	}()
@@ -121,26 +104,28 @@ func main() {
 
 	sigChan := installSignalHandler()
 
-	// Open our Log
-	if logFilename != "-" && logFilename != "stdout" {
-		lf, err := os.OpenFile("/var/log/apiban-ipsets.log", os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-		if err != nil {
-			log.Panic(err)
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			runtime.Goexit()
-		}
-		defer lf.Close()
-
-		log.SetOutput(lf)
-	}
-
 	log.Print("** Started APIBAN IPSETS CLIENT")
 	log.Print("Licensed under GPLv2. See LICENSE for details.")
 
 	// Open our config file
-	apiconfig, err := apiban.LoadConfig(configFilename)
+	apiconfig, err := apiban.LoadConfig()
 	if err != nil {
 		log.Fatalln(err)
+	}
+	fmt.Printf("FIXME: config after loading: %v\n", apiconfig)
+
+	// Open our Log
+	if apiconfig.LogFilename != "-" && apiconfig.LogFilename != "stdout" {
+		lf, err := os.OpenFile(apiconfig.LogFilename,
+			os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			//log.Panic(err)
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(-1)
+		}
+		defer lf.Close()
+
+		log.SetOutput(lf)
 	}
 
 	// if no APIKEY, exit
