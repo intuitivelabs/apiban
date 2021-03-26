@@ -183,12 +183,8 @@ func run(ctx context.Context, blset ipset.IPSet, apiconfig apiban.Config, sigCha
 	// Get list of banned ip's from APIBAN.org
 	fmt.Println("APIKEY", apiconfig.Apikey)
 	fmt.Println("URL", apiconfig.Url)
-	fmt.Println("TICK", apiconfig.Tick)
-	interval, err := time.ParseDuration(apiconfig.Tick)
-	if err != nil {
-		log.Print("Invalid interval format")
-		return err
-	}
+	fmt.Print("TICK", apiconfig.Tick)
+	interval := apiconfig.Tick
 
 	// start right away
 	currentTimeout := time.Duration(1 * time.Nanosecond)

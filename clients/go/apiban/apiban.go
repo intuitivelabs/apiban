@@ -233,7 +233,7 @@ func ProcBannedResponse(entry *Entry, id string, blset ipset.IPSet) {
 		//os.Exit(0)
 	}
 
-	ttl := GetConfig().blTtl
+	ttl := int(GetConfig().BlacklistTtl)
 	if ttl == 0 {
 		// try to get the ttl from the answers metada
 		metaTtl, ok := entry.Metadata["defaultBlacklistTtl"]
@@ -275,7 +275,7 @@ func ProcBannedResponse(entry *Entry, id string, blset ipset.IPSet) {
 				continue
 			}
 		}
-		err := blset.Add(ipStr, GetConfig().blTtl)
+		err := blset.Add(ipStr, int(GetConfig().BlacklistTtl))
 		if err != nil {
 			log.Print("Adding IP to ipset failed. ", err.Error())
 		} else {
