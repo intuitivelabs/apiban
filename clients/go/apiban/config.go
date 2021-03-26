@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	//"errors"
 	"fmt"
+	"io"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
@@ -36,10 +38,12 @@ type Config struct {
 	// passphrase used to generate encryption key for anonymization
 	Passphrase string `long:"PASSPHRASE" description:"password for encryption"`
 	// encryption key used for anonymization
-	EncryptionKey string `long:"ENCRYPTION_KEY" description:"encryption key as a hex string (password and key must not be set in the same time"`
+	EncryptionKey string `long:"ENCRYPTION_KEY" description:"encryption key as a hex string (password and key must not be set in the same time)"`
 
 	LogFilename string       `short:"l" long:"log" description:"log file or - for stdout"`
 	SetCfgFile  func(string) `short:"c" long:"config" description:"config file"`
+	Pdefaults   func()       `long:"defaults" description:"print default config"`
+	Pconfig     func(bool)   `long:"dump_cfg" optional:"1" optional-value:"0" description:"print current config, use true or 1 for condensed version"`
 
 	// black list ttl translated into seconds
 	blTtl    int
@@ -84,6 +88,19 @@ func LoadConfig() (*Config, error) {
 			return
 		}
 		cfg.filename = f // save current config name
+	}
+
+	// print default config
+	cfg.Pdefaults = func() {
+		dumpConfig(os.Stdout, DefaultConfig, true, false)
+		os.Exit(0)
+	}
+
+	// print current config (at the moment the command line parameter is
+	// encountered)
+	cfg.Pconfig = func(short bool) {
+		dumpConfig(os.Stdout, *cfg, !short, false)
+		os.Exit(0)
 	}
 
 	// parse command line
@@ -159,4 +176,45 @@ func (c *Config) String() string {
 	var b strings.Builder
 	json.NewEncoder(&b).Encode(c)
 	return b.String()
+}
+
+// dump config in a parseable config file format.
+func dumpConfig(w io.Writer, cfg Config, desc bool, altname bool) {
+	p := flags.NewParser(&cfg, flags.None)
+	for _, g := range p.Groups() {
+		fmt.Fprintf(w, "[%s]\n", g.ShortDescription)
+		prevDesc := false
+		for _, o := range g.Options() {
+			if !o.Hidden && o.Field().Type.Kind() != reflect.Func {
+				if desc && len(o.Description) != 0 {
+					if !prevDesc {
+						fmt.Fprintln(w)
+					}
+					fmt.Fprintf(w, "; %s\n", o.Description)
+				}
+				var name string
+				if !altname && len(o.LongName) != 0 {
+					name = o.LongName
+				} else if !altname && o.ShortName != 0 {
+					name = string(o.ShortName)
+				} else {
+					name = o.Field().Name
+				}
+				if o.Field().Type.Kind() == reflect.Slice {
+					s := reflect.ValueOf(o.Value())
+					for i := 0; i < s.Len(); i++ {
+						fmt.Fprintf(w, "%s = %v\n", name, s.Index(i))
+					}
+				} else {
+					fmt.Fprintf(w, "%s = %v\n", name, o.Value())
+				}
+				if desc && len(o.Description) != 0 {
+					fmt.Fprintln(w)
+					prevDesc = true
+				} else {
+					prevDesc = false
+				}
+			}
+		}
+	}
 }
