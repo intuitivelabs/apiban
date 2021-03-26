@@ -218,6 +218,9 @@ func Banned(key string, startFrom string, version string, baseUrl string) (*Entr
 		return out, nil
 	}
 
+	// store metadata
+	out.Metadata = e.Metadata
+
 	// Set the next ID and store it as state
 	out.ID = e.ID
 	GetState().Timestamp = e.ID
