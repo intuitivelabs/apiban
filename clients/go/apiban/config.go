@@ -5,6 +5,7 @@ import (
 	//"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"reflect"
 	"strings"
@@ -12,6 +13,10 @@ import (
 
 	"github.com/intuitivelabs/anonymization"
 	"github.com/jessevdk/go-flags"
+)
+
+const (
+	defaultId = "0"
 )
 
 var (
@@ -170,6 +175,33 @@ func LoadConfig() (*Config, error) {
 
 	return cfg, nil
 
+}
+
+func FixConfig(apiconfig *Config) error {
+	// if no APIKEY, exit
+	if apiconfig.Apikey == "" {
+		return fmt.Errorf("Invalid APIKEY. Exiting.")
+	}
+
+	// reset LKID to 100 if specified in config file
+	if apiconfig.Full == "yes" {
+		log.Print("FULL=yes in config file, resetting LKID")
+		apiconfig.Lkid = defaultId //"100"
+	}
+
+	// if no LKID, reset it to 100
+	if len(apiconfig.Lkid) == 0 {
+		log.Print("Resetting LKID")
+		apiconfig.Lkid = defaultId // "100"
+	} else {
+		log.Print("LKID:", apiconfig.Lkid)
+	}
+
+	// use default
+	if len(apiconfig.Chain) == 0 {
+		apiconfig.Chain = "BLOCKER"
+	}
+	return nil
 }
 
 // String converts the configuration data structure into a valid JSON string
