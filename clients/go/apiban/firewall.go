@@ -112,7 +112,7 @@ func InitializeIPTables(blChain string) (*ipset.IPSet, error) {
 		return nil, fmt.Errorf("failed to check if \"filter\" table %s chain exists: %w", blChain, err)
 	} else if !ok {
 		// chain does NOT exist; create a new chain
-		log.Print("\"filter\" table does not contain %s chain. Creating now...", blChain)
+		log.Print(`create chain %s in table "filter"`, blChain)
 		err = ipTables.t.ClearChain("filter", blChain)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create \"filter\" table %s chain: %w", blChain, err)
