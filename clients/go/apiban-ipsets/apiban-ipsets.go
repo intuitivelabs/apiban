@@ -46,10 +46,6 @@ var (
 	wg          sync.WaitGroup
 )
 
-const (
-	defaultId = "0"
-)
-
 func init() {
 }
 
@@ -127,41 +123,8 @@ func main() {
 		log.SetOutput(lf)
 	}
 
-	// if no APIKEY, exit
-	if apiconfig.Apikey == "" {
-		log.Fatalln("Invalid APIKEY. Exiting.")
-	}
-	// log config values
-	log.Print("CLI of FULL received, resetting LKID")
-
-	// allow cli of FULL to reset LKID to 100
-	if len(os.Args) > 1 {
-		arg1 := os.Args[1]
-		if arg1 == "FULL" {
-			log.Print("CLI of FULL received, resetting LKID")
-			apiconfig.Lkid = defaultId //"100"
-		}
-	} else {
-		log.Print("no command line arguments received")
-	}
-
-	// reset LKID to 100 if specified in config file
-	if apiconfig.Full == "yes" {
-		log.Print("FULL=yes in config file, resetting LKID")
-		apiconfig.Lkid = defaultId //"100"
-	}
-
-	// if no LKID, reset it to 100
-	if len(apiconfig.Lkid) == 0 {
-		log.Print("Resetting LKID")
-		apiconfig.Lkid = defaultId // "100"
-	} else {
-		log.Print("LKID:", apiconfig.Lkid)
-	}
-
-	// use default
-	if len(apiconfig.Chain) == 0 {
-		apiconfig.Chain = "BLOCKER"
+	if err := apiban.FixConfig(apiconfig); err != nil {
+		log.Fatalln(err)
 	}
 	log.Print("Chain:", apiconfig.Chain)
 
