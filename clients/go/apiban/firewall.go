@@ -80,17 +80,17 @@ func (ipt *IPTables) AddTarget(table string, chain string, target string) error 
 	// Check if target exists
 	ok, err := ipt.t.Exists(table, chain, "-j", target)
 	if err != nil {
-		return fmt.Errorf("failed to check rule in %s chain of %s table: %w", err)
+		return fmt.Errorf(`failed to check if target "%s" is in table:"%s" chain:"%s": %w`, target, table, chain, err)
 	}
 	// add target to the chain
 	if !ok {
-		log.Print("Adding target %s to %s chain of %s table", target, chain, table)
+		log.Printf(`Adding target "%s" to table:"%s" chain:"%s"`, target, table, chain)
 		err = ipt.t.Insert(table, chain, 1, "-j", target)
 		if err != nil {
-			return fmt.Errorf("failed to add blocking target to INPUT chain: %w", err)
+			return fmt.Errorf(`failed to add target "%s" to table:"%s" chain:"%s": %w`, target, table, chain, err)
 		}
 	} else {
-		log.Print("Target %s is already present in %s chain of %s table", target, chain, table)
+		log.Printf(`Target "%s" is already present in table:"%s" chain:"%s"`, target, table, chain)
 	}
 	return nil
 }
