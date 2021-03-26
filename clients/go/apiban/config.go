@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/intuitivelabs/anonymization"
+	"github.com/jessevdk/go-flags"
 )
 
 var (
@@ -21,29 +22,31 @@ var (
 
 // Config is the structure for the JSON config file
 type Config struct {
-	Apikey  string `json:"APIKEY"`
-	Lkid    string `json:"LKID"`
-	Version string `json:"VERSION"`
-	Url     string `json:"URL"`
-	Chain   string `json:"CHAIN"`
-	Tick    string `json:"INTERVAL"`
-	Full    string `json:"FULL"`
+	Apikey  string `long:"APIKEY" description:"api key"`
+	Lkid    string `long:"LKID" description:"lk id"`
+	Version string `long:"VERSION" description:"protocol version"`
+	Url     string `long:"URL" description:"ban list server url"`
+	Chain   string `long:"CHAIN" description:"ipset chain name"`
+	Tick    string `long:"INTERVAL" description:"tick interval"`
+	Full    string `long:"FULL"`
 	// state filename
-	StateFilename string `json:"STATE_FILENAME"`
+	StateFilename string `long:"STATE_FILENAME" description:"filename for keeping the state"`
 	// ttl for the firewall DROP rules
-	BlacklistTtl string `json:"BLACKLIST_TTL"`
+	BlacklistTtl string `long:"BLACKLIST_TTL" description:"blacklisted entry timeout"`
 	// passphrase used to generate encryption key for anonymization
-	Passphrase string `json:"PASSPHRASE"`
+	Passphrase string `long:"PASSPHRASE" description:"password for encryption"`
 	// encryption key used for anonymization
-	EncryptionKey string `json:"ENCRYPTION_KEY"`
+	EncryptionKey string `long:"ENCRYPTION_KEY" description:"encryption key as a hex string (password and key must not be set in the same time"`
 
 	// black list ttl translated into seconds
 	blTtl    int
 	filename string
 }
 
+var DefaultConfig = Config{}
+
 // global configuration
-var config = &Config{}
+var config = &DefaultConfig
 
 func GetConfig() *Config {
 	return config
@@ -68,14 +71,14 @@ func LoadConfig(configFilename string) (*Config, error) {
 	filenames = append(filenames, defaultConfigFilenames[:]...)
 
 	for _, loc := range filenames {
-		f, err := os.Open(loc)
-		if err != nil {
-			continue
-		}
-		defer f.Close()
 
 		cfg := config
-		if err := json.NewDecoder(f).Decode(cfg); err != nil {
+		err := flags.IniParse(loc, cfg)
+		if err != nil {
+			if _, ok := err.(*os.PathError); ok {
+				// file not found
+				continue
+			}
 			return nil, fmt.Errorf("failed to read configuration from %s: %w", loc, err)
 		}
 
