@@ -78,6 +78,9 @@ var (
 	ErrEncryptFieldNotString = errors.New("encrypt field is not string in JSON")
 	ErrEncryptNoKey          = errors.New("IP encrypted but no passphrase or encryption key configured")
 	ErrEncryptWrongKey       = errors.New("IP encrypted but wrong passphrase or encryption key configured")
+	// API JSON errors
+	ErrJsonMetadataDefaultBlacklistTtlMissing  = errors.New(`"defaultBlacklistTtl not present in metadata`)
+	ErrJsonMetadataDefaultBlacklistTtlDataType = errors.New(`"defaultBlacklistTtl has wrong data type`)
 )
 
 // Entry describes a set of blocked IP addresses from APIBAN.org
