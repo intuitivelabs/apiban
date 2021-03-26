@@ -29,17 +29,17 @@ var (
 
 // Config is the structure for the JSON config file
 type Config struct {
-	Apikey  string `long:"APIKEY" description:"api key"`
-	Lkid    string `long:"LKID" description:"lk id"`
-	Version string `long:"VERSION" description:"protocol version"`
-	Url     string `long:"URL" description:"URL of blacklisted IPs DB"`
-	Chain   string `long:"CHAIN" description:"ipset chain name for matching entries"`
-	Tick    string `long:"INTERVAL" description:"interval for the list refresh"`
-	Full    string `long:"FULL" description:"yes/no - starting from scratch"`
+	Apikey  string        `long:"APIKEY" description:"api key"`
+	Lkid    string        `long:"LKID" description:"lk id"`
+	Version string        `long:"VERSION" description:"protocol version"`
+	Url     string        `long:"URL" description:"URL of blacklisted IPs DB"`
+	Chain   string        `long:"CHAIN" description:"ipset chain name for matching entries"`
+	Tick    time.Duration `long:"INTERVAL" description:"interval for the list refresh"`
+	Full    string        `long:"FULL" description:"yes/no - starting from scratch"`
 	// state filename
 	StateFilename string `long:"STATE_FILENAME" description:"filename for keeping the state"`
 	// ttl for the firewall DROP rules
-	BlacklistTtl string `long:"BLACKLIST_TTL" description:"blacklisted entry timeout"`
+	BlacklistTtl uint `long:"BLACKLIST_TTL" description:"default blacklisted entry timeout in seconds"`
 	// passphrase used to generate encryption key for anonymization
 	Passphrase string `long:"PASSPHRASE" description:"password for encryption"`
 	// encryption key used for anonymization
@@ -50,8 +50,6 @@ type Config struct {
 	Pdefaults   func()       `long:"defaults" description:"print default config"`
 	Pconfig     func(bool)   `long:"dump_cfg" optional:"1" optional-value:"0" description:"print current config, use true or 1 for condensed version"`
 
-	// black list ttl translated into seconds
-	blTtl    int
 	filename string
 }
 
@@ -59,7 +57,7 @@ var DefaultConfig = Config{
 	Url:         "https://siem.intuitivelabs.com/api/",
 	Chain:       "BLOCKER",
 	LogFilename: "/var/log/apiban-ipsets.log",
-	Tick:        "60s",
+	Tick:        60 * time.Second,
 	Full:        "no",
 }
 
@@ -154,14 +152,6 @@ func LoadConfig() (*Config, error) {
 
 	loc := cfg.filename
 	// translate configuration parameters if needed
-	if t, err := time.ParseDuration(cfg.BlacklistTtl); err != nil {
-		return nil, fmt.Errorf("bad blacklist ttl in %q: %w", loc, err)
-	} else if t.Seconds() < 0 {
-		return nil, fmt.Errorf("blacklist ttl value too small  in %q: %w",
-			loc, err)
-	} else {
-		cfg.blTtl = int(t.Seconds())
-	}
 
 	if len(cfg.Passphrase) != 0 && len(cfg.EncryptionKey) != 0 {
 		return nil, fmt.Errorf("failed to read configuration from %s: both passphrase and encryption key are provided", loc)
