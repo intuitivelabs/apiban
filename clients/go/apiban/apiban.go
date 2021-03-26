@@ -231,6 +231,23 @@ func Banned(key string, startFrom string, version string, baseUrl string) (*Entr
 	return out, nil
 }
 
+func getTtlFromMetadata(metadata MetadataMap) (ttl int, err error) {
+	ttl = 0
+	err = nil
+
+	if metaTtl, ok := metadata["defaultBlacklistTtl"]; ok {
+		// JSON numbers are float64
+		if jsonTtl, ok := metaTtl.(float64); ok {
+			ttl = int(jsonTtl)
+			return
+		}
+		err = ErrJsonMetadataDefaultBlacklistTtlDataType
+		return
+	}
+	err = ErrJsonMetadataDefaultBlacklistTtlMissing
+	return
+}
+
 // ProceBannedResponse processes the response returned by the GET(banned) API
 func ProcBannedResponse(entry *Entry, id string, blset ipset.IPSet) {
 	if entry.ID == id || len(entry.IPs) == 0 {
@@ -241,12 +258,17 @@ func ProcBannedResponse(entry *Entry, id string, blset ipset.IPSet) {
 
 	ttl := GetConfig().blTtl
 	if ttl == 0 {
+		var err error
 		// try to get the ttl from the answers metada
-		metaTtl, ok := entry.Metadata["defaultBlacklistTtl"]
-		if ok {
-			ttl, _ = metaTtl.(int)
+		if ttl, err = getTtlFromMetadata(entry.Metadata); err != nil {
+			log.Printf("failed to get blacklist ttl from metadata: %w", err)
+			ttl = 0
+		} else if ttl < 0 {
+			// negative ttl does not make sense
+			ttl = 0
 		}
 	}
+	log.Print("ttl: ", ttl)
 	for _, s := range entry.IPs {
 		/*
 			//BUG in ipset library? Test method does not seem to work properly - returns;  Failed to test ipset list entry-error testing entry 184.159.238.21: exit status 1 (184.159.238.21 is NOT in set blacklist.
@@ -277,11 +299,11 @@ func ProcBannedResponse(entry *Entry, id string, blset ipset.IPSet) {
 		if kvCode, ok := s["encrypt"]; ok {
 			var err error
 			if ipStr, err = decryptIp(ipStr, kvCode); err != nil {
-				log.Printf("Error while decrypting ip %s: %s", ipStr, err)
+				log.Printf("Error while decrypting ip %s: %w", ipStr, err)
 				continue
 			}
 		}
-		err := blset.Add(ipStr, GetConfig().blTtl)
+		err := blset.Add(ipStr, ttl)
 		if err != nil {
 			log.Print("Adding IP to ipset failed. ", err.Error())
 		} else {
