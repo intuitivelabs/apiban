@@ -21,9 +21,9 @@ const (
 
 var (
 	defaultConfigFilenames = [...]string{
-		"/etc/apiban-ipsets/config.json",
-		"config.json",
-		"/usr/local/bin/apiban/config.json",
+		"/etc/apiban-ipsets/config.ini",
+		"config.ini",
+		"/usr/local/bin/apiban/config.ini",
 	}
 )
 
@@ -79,6 +79,10 @@ func LoadConfig() (*Config, error) {
 	// set on config file option function
 	cfg.SetCfgFile = func(f string) {
 		cfgFileCnt++
+		if f == "" {
+			// force no config searching
+			return
+		}
 		if cfgFileCnt > 10 {
 			errCfgFile = fmt.Errorf("too many config files loaded"+
 				" (%d, current %w)", cfgFileCnt, f)
@@ -119,7 +123,7 @@ func LoadConfig() (*Config, error) {
 		// If we can determine the user configuration directory, try there
 		configDir, err := os.UserConfigDir()
 		if err == nil {
-			filenames = append(filenames, fmt.Sprintf("%s/apiban-ipsets/config.json", configDir))
+			filenames = append(filenames, fmt.Sprintf("%s/apiban-ipsets/config.ini", configDir))
 		}
 
 		// Add standard static locations
