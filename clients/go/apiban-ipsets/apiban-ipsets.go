@@ -36,7 +36,6 @@ import (
 	"time"
 
 	"github.com/intuitivelabs/apiban/clients/go/apiban"
-	"github.com/vladabroz/go-ipset/ipset"
 )
 
 var (
@@ -195,10 +194,10 @@ func main() {
 	apiban.InitEncryption(apiconfig)
 
 	fmt.Println("Creating ipset...")
-	blset, err := apiban.InitializeIPTables(apiconfig.Chain)
+	iptables, err := apiban.InitializeIPTables(apiconfig.Chain, "blacklist", "whitelist", false /*dry-run?*/)
 
 	if err != nil {
-		log.Fatalln("failed to initialize iptables and ipsets", err)
+		log.Fatalln("failed to initialize iptables and ipsets: ", err)
 	}
 
 	//if iptinit == "chain created" {
@@ -219,19 +218,21 @@ func main() {
 	//}
 	//fmt.Print("Content", content)
 	fmt.Println("going to run in a looop")
-	if err := run(ctx, *blset, *apiconfig, sigChan); err != nil {
+	if err := run(ctx, *iptables, *apiconfig, sigChan); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 	}
 	wg.Wait()
 }
 
-func run(ctx context.Context, blset ipset.IPSet, apiconfig apiban.Config, sigChan chan os.Signal) error {
+func run(ctx context.Context, ipt apiban.IPTables, apiconfig apiban.Config, sigChan chan os.Signal) error {
 
-	var id string
+	var bId, aId string
+	var cnt int
 	// use the last timestamp saved in the state file (if non zero)
-	if id = apiban.GetState().Timestamp; id == "" {
-		id = apiconfig.Lkid
+	if bId = apiban.GetState().Timestamp; bId == "" {
+		bId = apiconfig.Lkid
 	}
+	aId = bId
 	// Get list of banned ip's from APIBAN.org
 	fmt.Println("APIKEY", apiconfig.Apikey)
 	fmt.Println("URL", apiconfig.Url)
@@ -256,16 +257,17 @@ func run(ctx context.Context, blset ipset.IPSet, apiconfig apiban.Config, sigCha
 			signalHandler(sig)
 
 		case t = <-ticker.C:
+			cnt++
 			// change the timeout to the one in the configuration
 			log.Println("ticker:", t)
-			res, err := apiban.Banned(apiconfig.Apikey, id, apiconfig.Version, apiconfig.Url)
+			//res, err := apiban.ApiRequest(apiconfig.Apikey, id, apiconfig.Version, apiconfig.Url, "banned")
+			bId, err = apiban.ApiBannedIP(apiconfig.Apikey, bId, apiconfig.Version, apiconfig.Url, apiconfig.Lkid)
 			if err != nil {
-				log.Println("failed to get banned list:", err)
-			} else if res == nil {
-				log.Println("response with empty body")
-			} else {
-				apiban.ProcBannedResponse(res, apiconfig.Lkid, blset)
-				id = res.ID
+				log.Printf("failed to update blacklist: %s", err)
+			}
+			aId, err = apiban.ApiAllowedIP(apiconfig.Apikey, aId, apiconfig.Version, apiconfig.Url, apiconfig.Lkid)
+			if err != nil {
+				log.Println("failed to update whitelist: %s", err)
 			}
 		}
 		newTimeout := interval

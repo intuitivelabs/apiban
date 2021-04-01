@@ -2,21 +2,44 @@ package apiban
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"log"
 	"os/exec"
 	"reflect"
+	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/vladabroz/go-ipset/ipset"
 )
 
 type IPTables struct {
-	ipset map[string]*ipset.IPSet
-	t     *iptables.IPTables
+	// table used for firewall rules
+	table string
+	// chain used as target by firewall rules
+	chain string
+	// name of the ipset set of addresses for blacklisting
+	Bl string
+	// name of the ipset set of addresses for whitelisting
+	Wl string
+
+	// api which manipulates rules used in iptables
+	t *iptables.IPTables
+
+	// sets used in the iptables rules
+	Sets map[string]*ipset.IPSet
+
+	// is this a dry run? if yes do not change anything in iptables/ipset, just dump the system commands that would be used
+	dryRun bool
 }
 
 var ipTables = &IPTables{}
+
+// errors
+var (
+	ErrNoBlacklistFound = errors.New("ipset blacklist was not found")
+	ErrNoWhitelistFound = errors.New("ipset whitelist was not found")
+)
 
 func checkIPSet(ipsetname string) (bool, error) {
 	type IPSet struct {
@@ -67,29 +90,32 @@ func checkIPSet(ipsetname string) (bool, error) {
 	return false, nil
 }
 
-func (ipt *IPTables) AddTarget(table string, chain string, target string) error {
+// AddTarget adds target (which is supposed to be a valid chain) as a jump target for chain
+func (ipt *IPTables) AddTarget(table, chain, target string) error {
 	// Check if target exists
 	ok, err := ipt.t.Exists(table, chain, "-j", target)
 	if err != nil {
-		return fmt.Errorf(`failed to check if target "%s" is in table:"%s" chain:"%s": %w`, target, table, chain, err)
+		if !ipt.dryRun {
+			return fmt.Errorf(`table:"%s" chain:"%s" target:"%s" check error: %w`, table, chain, target, err)
+		}
 	}
 	// add target to the chain
 	if !ok {
-		log.Printf(`Adding target "%s" to table:"%s" chain:"%s"`, target, table, chain)
-		err = ipt.t.Insert(table, chain, 1, "-j", target)
+		log.Printf(`Adding chain "%s" as target to table:"%s" chain:"%s"`, target, table, chain)
+		err = ipt.Insert(table, chain, 1, "-j", target)
 		if err != nil {
-			return fmt.Errorf(`failed to add target "%s" to table:"%s" chain:"%s": %w`, target, table, chain, err)
+			return fmt.Errorf(`failed to add chain "%s" as target to table:"%s" chain:"%s": %w`, target, table, chain, err)
 		}
 	} else {
-		log.Printf(`Target "%s" is already present in table:"%s" chain:"%s"`, target, table, chain)
+		log.Printf(`Chain "%s" is already a target in table:"%s" chain:"%s"`, target, table, chain)
 	}
 	return nil
 }
 
-func (ipt *IPTables) ChainExists(table string, chain string) (ok bool, err error) {
+func (ipt *IPTables) ChainExists(chain string) (ok bool, err error) {
 	ok = false
 	err = nil
-	chains, err := ipt.t.ListChains(table)
+	chains, err := ipt.t.ListChains(ipt.table)
 	if err != nil {
 		return
 	}
@@ -101,88 +127,149 @@ func (ipt *IPTables) ChainExists(table string, chain string) (ok bool, err error
 	return
 }
 
-func (ipt *IPTables) InsertIpsetRule(table string, chain string, set string, accept bool) (ok bool, err error) {
-	ok = false
-	err = nil
-	if s, mapOk := ipt.ipset[set]; !mapOk {
-		// this ipset was not created yet
-		s, err = ipset.New(set, "hash:ip", &ipset.Params{})
-		if err != nil {
-			err = fmt.Errorf(`failed to create ipset "%s": %w`, set, err)
-			return
-		}
-		// store the newly created ipset
-		ipt.ipset[set] = s
+//ClearChain is a wrapper for iptables.ClearChain which can be used for dry run
+func (ipt *IPTables) ClearChain(chain string) error {
+	log.Printf(`exec: "iptables -t %s -N %s || iptables -t %s -F %s"`, ipt.table, chain, ipt.table, chain)
+	if ipt.dryRun {
+		return nil
 	}
-	// Add rule to blocking chain to check ipset
-	log.Print("Creating a rule to check our ipset")
+	return ipTables.t.ClearChain(ipt.table, chain)
+}
+
+//Insert is a wrapper for iptables.Insert which can be used for dry run
+func (ipt *IPTables) Insert(table, chain string, pos int, rulespec ...string) error {
+	log.Printf(`exec: "iptables -t %s -I %s %d %s"`, table, chain, pos, strings.Join(rulespec, " "))
+	if ipt.dryRun {
+		return nil
+	}
+	return ipt.t.Insert(table, chain, pos, rulespec...)
+}
+
+func (ipt *IPTables) InsertIpsetRule(table, chain, set string, accept bool) (err error) {
+	err = nil
+	var target string
 	if accept {
 		// use ACCEPT target
-		log.Printf(`exec: "iptables -t %s -I %s 1 -m set --match-set %s src -j ACCEPT"`, table, chain, set)
-		err = ipTables.t.Insert(table, chain, 1, "-m", "set", "--match-set", set, "src", "-j", "ACCEPT")
+		target = "ACCEPT"
 	} else {
 		// use DROP target
-		log.Printf(`exec: "iptables -t %s -I %s 1 -m set --match-set %s src -j DROP"`, table, chain, set)
-		err = ipTables.t.Insert(table, chain, 1, "-m", "set", "--match-set", set, "src", "-j", "DROP")
+		target = "DROP"
 	}
-	if err != nil {
-		err = fmt.Errorf("failed to add ipset chain to INPUT chain: %w", err)
+	// create the ipset and get a handle to it (if the set exists it is NOT flushed)
+	if s, mapOk := ipt.Sets[set]; !mapOk {
+		// this ipset was not created yet
+		log.Printf(`exec: "ipset create %s hash:ip family inet hashsize 1024 maxelem 65536 timeout 0 -exist"`, set)
+		if !ipt.dryRun {
+			s, err = ipset.New(set, "hash:ip", &ipset.Params{})
+			if err != nil {
+				err = fmt.Errorf(`create ipset "%s" error: %w`, set, err)
+				return
+			}
+			// store the newly created ipset
+			ipt.Sets[set] = s
+		}
+	}
+	// Check if rule in ipset based rule in blocking chain
+	exists, iptablesErr := ipTables.t.Exists(table, chain, "-m", "set", "--match-set", set, "src", "-j", target)
+	if iptablesErr != nil {
+		// terminate only if not running in dry run mode
+		if !ipt.dryRun {
+			err = fmt.Errorf("rule check error: %w", iptablesErr)
+			return
+		}
+	}
+	if exists {
+		log.Printf(`rule already loaded: "-t %s -C %s -m set --match-set %s src -j %s"`, table, chain, set, target)
 		return
 	}
-	ok = true
+	// insert rule into chain using ipset
+	err = ipTables.Insert(table, chain, 1, "-m", "set", "--match-set", set, "src", "-j", target)
+	if err != nil {
+		err = fmt.Errorf("rule insert error: %w", err)
+	}
 	return
 }
 
-func InitializeIPTables(blChain string) (*ipset.IPSet, error) {
-	var err error
-	var blset *ipset.IPSet
+func (ipt *IPTables) InsertRuleBlacklist() (err error) {
+	return ipt.InsertIpsetRule(ipt.table, ipt.chain, ipt.Bl, false)
+}
 
-	ipTables.ipset = make(map[string]*ipset.IPSet)
+func (ipt *IPTables) InsertRuleWhitelist() (err error) {
+	return ipt.InsertIpsetRule(ipt.table, ipt.chain, ipt.Wl, true)
+}
+
+func (ipt *IPTables) AddToBlacklist(ip string, timeout int) (err error) {
+	if set, ok := ipt.Sets[ipt.Bl]; ok {
+		return set.Add(ip, timeout)
+	}
+	return ErrNoBlacklistFound
+}
+
+func (ipt *IPTables) AddToWhitelist(ip string, timeout int) (err error) {
+	if set, ok := ipt.Sets[ipt.Wl]; ok {
+		return set.Add(ip, timeout)
+	}
+	return ErrNoWhitelistFound
+}
+
+func InitializeIPTables(chain, bl, wl string, dryRun bool) (*IPTables, error) {
+	var err error
+
+	*ipTables = IPTables{
+		dryRun: dryRun,
+		table:  "filter",
+		chain:  chain,
+		Bl:     bl,
+		Wl:     wl,
+		Sets:   make(map[string]*ipset.IPSet)}
 	ipTables.t, err = iptables.New()
 	if err != nil {
 		log.Panic(err)
 	}
 
+	// create the user-defined chain for the firewall.
 	// check if the chain already exists
-	if ok, err := ipTables.ChainExists("filter", blChain); err != nil {
-		return nil, fmt.Errorf("failed to check if \"filter\" table %s chain exists: %w", blChain, err)
+	if ok, err := ipTables.ChainExists(chain); err != nil {
+		return nil, fmt.Errorf(`"%s" table "%s" chain check error: %w`, ipTables.table, chain, err)
 	} else if !ok {
 		// chain does NOT exist; create a new chain
-		log.Print(`create chain %s in table "filter"`, blChain)
-		err = ipTables.t.ClearChain("filter", blChain)
+		log.Printf(`create chain "%s" in table "%s"`, chain, ipTables.table)
+		err = ipTables.ClearChain(chain)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create \"filter\" table %s chain: %w", blChain, err)
+			return nil, fmt.Errorf(`"%s" table "%s" chain create error: %w`, ipTables.table, chain, err)
+		}
+	} else {
+		// chain exists; show a warning with all the rules in the chain
+		if rules, err := ipTables.t.List(ipTables.table, chain); err != nil {
+			return nil, fmt.Errorf(`"%s" table "%s" chain list error: %w`, ipTables.table, chain, err)
+		} else {
+			log.Printf(
+				`WARNING: "%s" table "%s" chain exists and has the following rules:
+"%s"`,
+				ipTables.table, chain, strings.Join(rules, "\n"))
 		}
 	}
 
 	// add the chain parameter as target for the INPUT chain
-	if err = ipTables.AddTarget("filter", "INPUT", blChain); err != nil {
+	if err = ipTables.AddTarget(ipTables.table, "INPUT", chain); err != nil {
 		return nil, err
 	}
 	// add the chain parameter as target for the FORWARD chain
-	if err = ipTables.AddTarget("filter", "FORWARD", blChain); err != nil {
+	if err = ipTables.AddTarget(ipTables.table, "FORWARD", chain); err != nil {
 		return nil, err
 	}
 
-	// Check if rule in ipset based rule in blocking chain
-	ok, err := ipTables.t.Exists("filter", blChain, "-m", "set", "--match-set", "blacklist", "src", "-j", "DROP")
-	if err != nil {
-		//return "error", fmt.Errorf("failed check rule for ipset: %w", err)
-		return nil, fmt.Errorf("failed check rule for ipset: %w", err)
-	}
-	if !ok {
-		ipTables.InsertIpsetRule("filter", blChain, "blacklist", false)
-	} else {
-		log.Printf(`"ipset" based "DROP" rule is already present in table:"filter" chain "%s"`, blChain)
+	if err := ipTables.InsertRuleBlacklist(); err != nil {
+		return nil, fmt.Errorf(`blacklist rule insert error: %w`, err)
 	}
 
-	// workaround - flush our CHAIN first
-	err = ipTables.t.ClearChain("filter", blChain)
-	if err != nil {
-		//return "error", fmt.Errorf("failed to add ipset chain to INPUT chain: %w", err)
-		return nil, fmt.Errorf("failed to clean our chain: %w", err)
+	if err := ipTables.InsertRuleWhitelist(); err != nil {
+		return nil, fmt.Errorf(`whitelist rule insert error: %w`, err)
 	}
 
-	//return "chain created", nil
-	return blset, nil
+	return ipTables, nil
+}
+
+func IpTables() *IPTables {
+	return ipTables
 }
