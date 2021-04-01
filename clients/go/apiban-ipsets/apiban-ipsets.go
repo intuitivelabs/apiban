@@ -173,7 +173,7 @@ func main() {
 }
 
 func run(ctx context.Context, ipt apiban.IPTables, apiconfig apiban.Config, sigChan chan os.Signal) error {
-
+	var err error
 	var bId, aId string
 	var cnt int
 	// use the last timestamp saved in the state file (if non zero)

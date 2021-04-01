@@ -225,17 +225,10 @@ func ProcBannedResponse(entry *IPResponse, id string, blset ipset.IPSet) {
 		//os.Exit(0)
 	}
 
-	ttl := GetConfig().blTtl
+	ttl := int(GetConfig().BlacklistTtl)
 	if ttl == 0 {
-		var err error
 		// try to get the ttl from the answers metada
-		if ttl, err = getTtlFromMetadata(entry.Metadata); err != nil {
-			log.Printf("failed to get blacklist ttl from metadata: %s", err)
-			ttl = 0
-		} else if ttl < 0 {
-			// negative ttl does not make sense
-			ttl = 0
-		}
+		ttl, _ = getTtlFromMetadata(entry.Metadata)
 	}
 	log.Print("ttl: ", ttl)
 	for _, s := range entry.IPs {

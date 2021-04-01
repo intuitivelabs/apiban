@@ -35,7 +35,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"strings"
 	"time"
 
 	"github.com/intuitivelabs/anonymization"
@@ -244,12 +243,10 @@ func getTtlFromMetadata(metadata JSONMap) (ttl int, err error) {
 	err = nil
 
 	if metaTtl, ok := metadata["defaultBlacklistTtl"]; ok {
-		// JSON numbers are float64
-		if jsonTtl, ok := metaTtl.(float64); ok {
-			ttl = int(jsonTtl)
-			return
+		ttl, _ = metaTtl.(int)
+		if ttl < 0 {
+			ttl = 0
 		}
-		err = ErrJsonMetadataDefaultBlacklistTtlDataType
 		return
 	}
 	err = ErrJsonMetadataDefaultBlacklistTtlMissing
@@ -264,16 +261,8 @@ func ProcResponse(entry *IPResponse, id string, code APICode) {
 
 	ttl := int(GetConfig().BlacklistTtl / time.Second) // round-down to seconds
 	if ttl == 0 {
-		var err error
-		// try to get the ttl from the answers metada
-		metaTtl, ok := entry.Metadata["defaultBlacklistTtl"]
-		if ok {
-			ttl, _ = metaTtl.(int)
-		}
-		if ttl < 0 {
-			// negative ttl does not make sense
-			ttl = 0
-		}
+		// try to get the ttl from the answers metadata
+		ttl, _ = getTtlFromMetadata(entry.Metadata)
 	}
 	log.Print("ttl: ", ttl)
 	// process IP objects
