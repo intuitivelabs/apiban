@@ -35,6 +35,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
+	"time"
 
 	"github.com/intuitivelabs/anonymization"
 )
@@ -260,7 +262,7 @@ func ProcResponse(entry *IPResponse, id string, code APICode) {
 		log.Print("No new bans to add...")
 	}
 
-	ttl := int(GetConfig().BlacklistTtl)
+	ttl := int(GetConfig().BlacklistTtl / time.Second) // round-down to seconds
 	if ttl == 0 {
 		var err error
 		// try to get the ttl from the answers metada
