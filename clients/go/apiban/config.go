@@ -156,7 +156,8 @@ func LoadConfig() (*Config, error) {
 	loc := cfg.filename
 	// translate configuration parameters if needed
 	if cfg.BlacklistTtl < time.Second {
-		return nil, fmt.Errorf("blacklist ttl under 1s in %q: %s\n", loc, cfg.BlacklistTtl)
+		log.Printf("blacklist ttl under 1s in %q: %s. Setting it to 0\n", loc, cfg.BlacklistTtl)
+		cfg.BlacklistTtl = 0
 	}
 
 	if len(cfg.Passphrase) != 0 && len(cfg.EncryptionKey) != 0 {
