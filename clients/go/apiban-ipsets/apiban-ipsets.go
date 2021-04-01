@@ -108,7 +108,6 @@ func main() {
 	if err != nil {
 		log.Fatalln(err)
 	}
-	fmt.Printf("FIXME: config after loading: %v\n", apiconfig)
 
 	// Open our Log
 	if apiconfig.LogFilename != "-" && apiconfig.LogFilename != "stdout" {
