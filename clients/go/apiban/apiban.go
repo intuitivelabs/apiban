@@ -34,10 +34,9 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"strings"
+	"net/url"
 
 	"github.com/intuitivelabs/anonymization"
-	"github.com/vladabroz/go-ipset/ipset"
 )
 
 var (
@@ -58,13 +57,18 @@ var transCfg = &http.Transport{
 
 var httpClient = &http.Client{Transport: transCfg}
 
+// API response JSON objects
 var IPMapKeys = [...]string{"IP", "fromua", "encrypt", "exceeded", "count", "timestamp"}
-
-type IPMap map[string]interface{}
-
 var MetadataKeys = [...]string{"defaultBlacklistTtl"}
 
-type MetadataMap map[string]interface{}
+type JSONMap map[string]interface{}
+
+type APICode int
+
+const (
+	APIBanned APICode = iota
+	APIAllowed
+)
 
 // errors
 var (
@@ -75,25 +79,14 @@ var (
 	// Banned)
 	ErrBadRequest = errors.New("Bad Request")
 	// encryption errors
-	ErrEncryptFieldNotString = errors.New("encrypt field is not string in JSON")
-	ErrEncryptNoKey          = errors.New("IP encrypted but no passphrase or encryption key configured")
-	ErrEncryptWrongKey       = errors.New("IP encrypted but wrong passphrase or encryption key configured")
+	ErrEncryptNoKey    = errors.New("IP encrypted but no passphrase or encryption key configured")
+	ErrEncryptWrongKey = errors.New("IP encrypted but wrong passphrase or encryption key configured")
 	// API JSON errors
-	ErrJsonMetadataDefaultBlacklistTtlMissing  = errors.New(`"defaultBlacklistTtl not present in metadata`)
-	ErrJsonMetadataDefaultBlacklistTtlDataType = errors.New(`"defaultBlacklistTtl has wrong data type`)
+	ErrJsonMetadataDefaultBlacklistTtlMissing  = errors.New(`malformed JSON response: "defaultBlacklistTtl not present in metadata`)
+	ErrJsonMetadataDefaultBlacklistTtlDataType = errors.New(`malformed JSON response: "defaultBlacklistTtl has wrong data type`)
+	ErrJsonEncryptFieldNotString               = errors.New("malformed JSON response: encrypt field is not string in JSON")
+	ErrJsonEmptyIPAddressField                 = errors.New("malformed JSON response: IP address field is empty")
 )
-
-// Entry describes a set of blocked IP addresses from APIBAN.org
-type Entry struct {
-	// omit Meta when decoding
-	Metadata MetadataMap `json:"metadata"`
-
-	// ID is the timestamp of the next Entry
-	ID string `json:"ID"`
-
-	// IPs is the list of blocked IP addresses in this entry
-	IPs []IPMap `json:"ipaddress"`
-}
 
 func InitEncryption(c *Config) {
 	var (
@@ -140,50 +133,9 @@ func isPlainTxt(code string) bool {
 	return (code == "0") || (code == "plain")
 }
 
-func decryptIp(encrypted string, kvCode interface{}) (decrypted string, err error) {
-	// check the string type for "encrypt" field
-	err = nil
-	decrypted = encrypted
-	kvCodeStr, ok := kvCode.(string)
-	if !ok {
-		err = ErrEncryptFieldNotString
-		return
-	}
-	log.Print("encrypt field: ", kvCodeStr)
-	if isPlainTxt(kvCodeStr) {
-		// not encrypted; passthrough
-		return
-	}
-	// check if encrypt flags are part of the encrypt field
-	split := strings.Split(kvCodeStr, "|")
-	switch len(split) {
-	case 1:
-		// flags are not there; nothing special to do
-	case 2:
-		// flags are present; get the code
-		kvCodeStr = split[1]
-		log.Print("key validation code: ", kvCodeStr)
-	default:
-		// broken format
-		err = fmt.Errorf("encrypt field unknown format: %s", kvCodeStr)
-		return
-	}
-	if (Validator == nil) || (Ipcipher == nil) {
-		err = ErrEncryptNoKey
-		return
-	}
-	if !Validator.Validate(kvCodeStr) {
-		err = ErrEncryptWrongKey
-		return
-	}
-	decrypted = Ipcipher.(*anonymization.Ipcipher).DecryptStr(encrypted)
-	return
-}
+func ApiRequestWithQueryValues(key, startFrom, baseUrl, api string, values url.Values) (*IPResponse, error) {
+	var apiUrl string
 
-// Banned returns a set of banned addresses, optionally limited to the
-// specified startFrom ID.  If no startFrom is supplied, the entire current list will
-// be pulled.
-func Banned(key string, startFrom string, version string, baseUrl string) (*Entry, error) {
 	if key == "" {
 		return nil, errors.New("API Key is required")
 	}
@@ -192,12 +144,66 @@ func Banned(key string, startFrom string, version string, baseUrl string) (*Entr
 		startFrom = "100" // NOTE: arbitrary ID copied from reference source
 	}
 
-	out := &Entry{
+	out := &IPResponse{
 		ID: startFrom,
 	}
 
-	url := fmt.Sprintf("%s%s/banned/%s?version=%s", baseUrl, key, out.ID, version)
-	log.Println("banned url: ", url)
+	query := values.Encode()
+
+	if len(query) > 0 {
+		apiUrl = fmt.Sprintf("%s%s/%s/%s?%s", baseUrl, key, api, out.ID, values.Encode())
+	} else {
+		apiUrl = fmt.Sprintf("%s%s/%s/%s", baseUrl, key, api, out.ID)
+	}
+	log.Printf(`"%s" api url: %s`, api, apiUrl)
+	e, err := queryServer(httpClient, apiUrl)
+	if err != nil {
+		return nil, err
+	}
+
+	// empty body
+	if e == nil {
+		return nil, nil
+	}
+
+	if e.ID == "" {
+		fmt.Println("e.ID empty")
+		return nil, errors.New("empty ID received")
+	}
+
+	if e.ID == "none" || len(e.IPs) == 0 {
+		// do not save the ID
+		return out, nil
+	}
+
+	// store metadata
+	out.Metadata = e.Metadata
+
+	// Set the next ID and store it as state
+	out.ID = e.ID
+	GetState().Timestamp = e.ID
+
+	// Aggregate the received IPs
+	out.IPs = append(out.IPs, e.IPs...)
+
+	return out, nil
+}
+
+func ApiRequest(key, startFrom, version, baseUrl, api string) (*IPResponse, error) {
+	if key == "" {
+		return nil, errors.New("API Key is required")
+	}
+
+	if startFrom == "" {
+		startFrom = "100" // NOTE: arbitrary ID copied from reference source
+	}
+
+	out := &IPResponse{
+		ID: startFrom,
+	}
+
+	url := fmt.Sprintf("%s%s/%s/%s?version=%s", baseUrl, key, api, out.ID, version)
+	log.Printf(`"%s" api url: %s`, api, url)
 	e, err := queryServer(httpClient, url)
 	if err != nil {
 		return nil, err
@@ -231,7 +237,7 @@ func Banned(key string, startFrom string, version string, baseUrl string) (*Entr
 	return out, nil
 }
 
-func getTtlFromMetadata(metadata MetadataMap) (ttl int, err error) {
+func getTtlFromMetadata(metadata JSONMap) (ttl int, err error) {
 	ttl = 0
 	err = nil
 
@@ -248,12 +254,10 @@ func getTtlFromMetadata(metadata MetadataMap) (ttl int, err error) {
 	return
 }
 
-// ProceBannedResponse processes the response returned by the GET(banned) API
-func ProcBannedResponse(entry *Entry, id string, blset ipset.IPSet) {
+// ProcResponse processes the response returned by the GET API.
+func ProcResponse(entry *IPResponse, id string, code APICode) {
 	if entry.ID == id || len(entry.IPs) == 0 {
-		//log.Print("Great news... no new bans to add. Exiting...")
 		log.Print("No new bans to add...")
-		//os.Exit(0)
 	}
 
 	ttl := GetConfig().blTtl
@@ -269,47 +273,8 @@ func ProcBannedResponse(entry *Entry, id string, blset ipset.IPSet) {
 		}
 	}
 	log.Print("ttl: ", ttl)
-	for _, s := range entry.IPs {
-		/*
-			//BUG in ipset library? Test method does not seem to work properly - returns;  Failed to test ipset list entry-error testing entry 184.159.238.21: exit status 1 (184.159.238.21 is NOT in set blacklist.
-			log.Print("Working on entry", s)
-			exists, erro := blset.Test(s)
-			if exists == false {
-				log.Print("Failed to test ipset list entry-", erro)
-			}
-			if exists == true {
-				log.Print("Entry already existing...")
-				continue
-			}
-			if exists == false {
-				log.Print("Entry NOT existing...")
-			}
-		*/
-		// check if the "IP" field is present
-		ip, ok := s["IP"]
-		if !ok {
-			continue
-		}
-		// check the string type for the "IP" field
-		ipStr, ok := ip.(string)
-		if !ok {
-			continue
-		}
-		// check if "encrypt" field is present
-		if kvCode, ok := s["encrypt"]; ok {
-			var err error
-			if ipStr, err = decryptIp(ipStr, kvCode); err != nil {
-				log.Printf("Error while decrypting ip %s: %s", ipStr, err)
-				continue
-			}
-		}
-		err := blset.Add(ipStr, ttl)
-		if err != nil {
-			log.Print("Adding IP to ipset failed. ", err.Error())
-		} else {
-			log.Print("Processing IP: ", ip)
-		}
-	}
+	// process IP objects
+	procIP(entry.IPs, ttl, code)
 }
 
 // Check queries APIBAN.org to see if the provided IP address is blocked.
@@ -332,7 +297,7 @@ func Check(key string, ip string) (bool, error) {
 	if entry == nil {
 		return false, errors.New("empty entry received")
 	} else if len(entry.IPs) == 1 {
-		if entry.IPs[0]["IP"] == "not blocked" {
+		if entry.IPs[0].IP == "not blocked" {
 			// Not blocked
 			return false, nil
 		}
@@ -342,15 +307,16 @@ func Check(key string, ip string) (bool, error) {
 	return true, nil
 }
 
-func processAnswer(msg io.Reader) (*Entry, error) {
-	entry := new(Entry)
+func processAnswer(msg io.Reader) (*IPResponse, error) {
+	entry := new(IPResponse)
 	if err := json.NewDecoder(msg).Decode(entry); err != nil {
 		return nil, err
 	}
+	log.Printf("JSON response: %v", entry)
 	return entry, nil
 }
 
-func queryServer(c *http.Client, u string) (*Entry, error) {
+func queryServer(c *http.Client, u string) (*IPResponse, error) {
 	//resp, err := http.Get(u)
 	resp, err := c.Get(u)
 	if err != nil {
@@ -379,7 +345,7 @@ func queryServer(c *http.Client, u string) (*Entry, error) {
 	if resp.ContentLength == 0 {
 		return nil, nil
 	}
-	var entry *Entry
+	var entry *IPResponse
 	if entry, err = processAnswer(resp.Body); err != nil {
 		return nil, fmt.Errorf("failed to decode server response: %s", err.Error())
 	}
@@ -387,7 +353,7 @@ func queryServer(c *http.Client, u string) (*Entry, error) {
 	return entry, nil
 }
 
-func processBadRequest(resp *http.Response) (*Entry, error) {
+func processBadRequest(resp *http.Response) (*IPResponse, error) {
 	var buf bytes.Buffer
 	if _, err := buf.ReadFrom(resp.Body); err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
@@ -397,7 +363,7 @@ func processBadRequest(resp *http.Response) (*Entry, error) {
 	r := bytes.NewReader(buf.Bytes())
 
 	// First, try decoding as a normal entry
-	e := new(Entry)
+	e := new(IPResponse)
 	if err := json.NewDecoder(r).Decode(e); err == nil {
 		// Successfully decoded normal entry
 
@@ -412,7 +378,7 @@ func processBadRequest(resp *http.Response) (*Entry, error) {
 		}
 
 		if len(e.IPs) > 0 {
-			switch e.IPs[0]["IP"] {
+			switch e.IPs[0].IP {
 			case "no new bans":
 				return e, nil
 			}
