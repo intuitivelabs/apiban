@@ -8,5 +8,5 @@
 	"FULL":"yes",
     "BLACKLIST_TTL": "24h",
     "STATE_FILENAME": "/tmp/apiban.state",
-    "ENCRYPTION_KEY": "3f4d71d87a9649ad8d57329c271507c9"
+    "ENCRYPTION_KEY": "bb8dcd7be9a6f43b3304c640d7d7103c"
 }
