@@ -35,6 +35,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/intuitivelabs/anonymization"
 	"github.com/vladabroz/go-ipset/ipset"
@@ -233,7 +234,7 @@ func ProcBannedResponse(entry *Entry, id string, blset ipset.IPSet) {
 		//os.Exit(0)
 	}
 
-	ttl := int(GetConfig().BlacklistTtl)
+	ttl := int(GetConfig().BlacklistTtl / time.Second) // round-down to seconds
 	if ttl == 0 {
 		// try to get the ttl from the answers metada
 		metaTtl, ok := entry.Metadata["defaultBlacklistTtl"]
@@ -275,7 +276,7 @@ func ProcBannedResponse(entry *Entry, id string, blset ipset.IPSet) {
 				continue
 			}
 		}
-		err := blset.Add(ipStr, int(GetConfig().BlacklistTtl))
+		err := blset.Add(ipStr, ttl)
 		if err != nil {
 			log.Print("Adding IP to ipset failed. ", err.Error())
 		} else {

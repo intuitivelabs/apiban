@@ -1,7 +1,6 @@
 package apiban
 
 import (
-	"encoding/json"
 	//"errors"
 	"fmt"
 	"io"
@@ -39,7 +38,7 @@ type Config struct {
 	// state filename
 	StateFilename string `long:"STATE_FILENAME" description:"filename for keeping the state"`
 	// ttl for the firewall DROP rules
-	BlacklistTtl uint `long:"BLACKLIST_TTL" description:"default blacklisted entry timeout in seconds"`
+	BlacklistTtl time.Duration `long:"BLACKLIST_TTL" description:"default blacklisted entry timeout in seconds"`
 	// passphrase used to generate encryption key for anonymization
 	Passphrase string `long:"PASSPHRASE" description:"password for encryption"`
 	// encryption key used for anonymization
@@ -156,6 +155,9 @@ func LoadConfig() (*Config, error) {
 
 	loc := cfg.filename
 	// translate configuration parameters if needed
+	if cfg.BlacklistTtl < time.Second {
+		return nil, fmt.Errorf("blacklist ttl under 1s in %q: %s\n", loc, cfg.BlacklistTtl)
+	}
 
 	if len(cfg.Passphrase) != 0 && len(cfg.EncryptionKey) != 0 {
 		return nil, fmt.Errorf("failed to read configuration from %s: both passphrase and encryption key are provided", loc)
@@ -165,7 +167,6 @@ func LoadConfig() (*Config, error) {
 		len(cfg.EncryptionKey) != (anonymization.EncryptionKeyLen*2) {
 		return nil, fmt.Errorf("failed to read configuration from %s: invalid length for encryption key (when non-empty, encryption key must have a length of 32 hex digits)", loc)
 	}
-
 
 	return cfg, nil
 
@@ -200,8 +201,8 @@ func FixConfig(apiconfig *Config) error {
 
 // String converts the configuration data structure into a valid JSON string
 func (c *Config) String() string {
-	var b strings.Builder
-	json.NewEncoder(&b).Encode(c)
+	b := strings.Builder{}
+	dumpConfig(&b, *c, false, false)
 	return b.String()
 }
 
