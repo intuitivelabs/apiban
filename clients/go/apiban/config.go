@@ -29,6 +29,7 @@ var (
 // Config is the structure for the JSON config file
 type Config struct {
 	Apikey  string        `long:"APIKEY" description:"api key"`
+	Token   string        `long:"TOKEN" description:"SSO token"`
 	Lkid    string        `long:"LKID" description:"lk id"`
 	Version string        `long:"VERSION" description:"protocol version"`
 	Url     string        `long:"URL" description:"URL of blacklisted IPs DB"`

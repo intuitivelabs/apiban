@@ -111,29 +111,37 @@ type IPResponse struct {
 	IPs []IPObj `json:"elements"`
 }
 
+func ApiIPReq(startFrom, token, baseUrl string, values url.Values) (*IPResponse, error) {
+	values.Add("token", token)
+	if startFrom == "" {
+		startFrom = "100" // NOTE: arbitrary ID copied from reference source
+	}
+	values.Add("timestamp", startFrom)
+	return ApiRequestWithQueryValues(baseUrl, "bwnoa/v4list", values)
+}
+
 // ApiBannedIPReq sends an HTTP request using an URL built like this from the input parameters:
 // https://baseUrl/key/banned/startFrom?version=version
-func ApiBannedIPReq(key, startFrom, version, baseUrl string) (*IPResponse, error) {
+func ApiBannedIPReq(startFrom, token, baseUrl string) (*IPResponse, error) {
 	values := url.Values{}
-	values.Add("version", version)
-	return ApiRequestWithQueryValues(key, startFrom, baseUrl, "banned", values)
+	values.Add("list", "ipblack")
+	return ApiIPReq(startFrom, token, baseUrl, values)
 }
 
 // ApiAllowedIPReq sends an HTTP request using an URL built like this from the input parameters:
 // https://baseUrl/key/banned/startFrom?version=version
-func ApiAllowedIPReq(key, startFrom, version, baseUrl string) (*IPResponse, error) {
+func ApiAllowedIPReq(startFrom, token, baseUrl string) (*IPResponse, error) {
 	values := url.Values{}
-	values.Add("version", version)
 	values.Add("list", "ipwhite")
-	return ApiRequestWithQueryValues(key, startFrom, baseUrl, "banned", values)
+	return ApiIPReq(startFrom, token, baseUrl, values)
 }
 
 // ApiBannedIP sends an HTTP request and processes the received request; it returns the "id" that should be used in the next request.
 // It uses an URL built like this from the input parameters:
 // https://baseUrl/key/banned/startFrom?version=version
-func ApiBannedIP(key, startFrom, version, baseUrl, configId string) (id string, err error) {
+func ApiBannedIP(startFrom, token, baseUrl, configId string) (id string, err error) {
 	id = ""
-	res, err := ApiBannedIPReq(key, startFrom, version, baseUrl)
+	res, err := ApiBannedIPReq(startFrom, token, baseUrl)
 	if err != nil {
 		err = fmt.Errorf(`"banned" request error: %w`, err)
 	} else if res == nil {
@@ -150,9 +158,9 @@ func ApiBannedIP(key, startFrom, version, baseUrl, configId string) (id string, 
 // ApiAllowedIP sends an HTTP request and processes the received request; it returns the "id" that should be used in the next request.
 // It uses an URL built like this from the input parameters:
 // https://baseUrl/key/banned/startFrom?version=version
-func ApiAllowedIP(key, startFrom, version, baseUrl, configId string) (id string, err error) {
+func ApiAllowedIP(startFrom, token, baseUrl, configId string) (id string, err error) {
 	id = ""
-	res, err := ApiAllowedIPReq(key, startFrom, version, baseUrl)
+	res, err := ApiAllowedIPReq(startFrom, token, baseUrl)
 	if err != nil {
 		err = fmt.Errorf(`"allowed" request error: %w`, err)
 	} else if res == nil {

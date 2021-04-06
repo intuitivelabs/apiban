@@ -134,12 +134,10 @@ func isPlainTxt(code string) bool {
 	return (code == "0") || (code == "plain")
 }
 
-func ApiRequestWithQueryValues(key, startFrom, baseUrl, api string, values url.Values) (*IPResponse, error) {
+func ApiRequestWithQueryValues(baseUrl, api string, values url.Values) (*IPResponse, error) {
 	var apiUrl string
 
-	if key == "" {
-		return nil, errors.New("API Key is required")
-	}
+	startFrom := values.Get("timestamp")
 
 	if startFrom == "" {
 		startFrom = "100" // NOTE: arbitrary ID copied from reference source
@@ -152,9 +150,9 @@ func ApiRequestWithQueryValues(key, startFrom, baseUrl, api string, values url.V
 	query := values.Encode()
 
 	if len(query) > 0 {
-		apiUrl = fmt.Sprintf("%s%s/%s/%s?%s", baseUrl, key, api, out.ID, values.Encode())
+		apiUrl = fmt.Sprintf("%s%s?%s", baseUrl, api, values.Encode())
 	} else {
-		apiUrl = fmt.Sprintf("%s%s/%s/%s", baseUrl, key, api, out.ID)
+		apiUrl = fmt.Sprintf("%s%s", baseUrl, api)
 	}
 	log.Printf(`"%s" api url: %s`, api, apiUrl)
 	e, err := queryServer(httpClient, apiUrl)

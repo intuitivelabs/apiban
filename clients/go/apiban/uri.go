@@ -14,5 +14,5 @@ func ApiBannedURI(key, startFrom, version, baseUrl string) (*IPResponse, error) 
 	values := url.Values{}
 	values.Add("version", version)
 	values.Add("table", "uriblack")
-	return ApiRequestWithQueryValues(key, startFrom, baseUrl, "banned", values)
+	return ApiRequestWithQueryValues(baseUrl, "banned", values)
 }
