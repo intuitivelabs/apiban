@@ -175,11 +175,6 @@ func LoadConfig() (*Config, error) {
 }
 
 func FixConfig(apiconfig *Config) error {
-	// if no APIKEY, exit
-	if apiconfig.Apikey == "" {
-		return fmt.Errorf("Invalid APIKEY. Exiting.")
-	}
-
 	// reset LKID to 100 if specified in config file
 	if apiconfig.Full == "yes" {
 		log.Print("FULL=yes in config file, resetting LKID")

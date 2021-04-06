@@ -181,7 +181,6 @@ func run(ctx context.Context, ipt apiban.IPTables, apiconfig apiban.Config, sigC
 	}
 	aId = bId
 	// Get list of banned ip's from APIBAN.org
-	fmt.Println("APIKEY", apiconfig.Apikey)
 	fmt.Println("URL", apiconfig.Url)
 	fmt.Print("TICK", apiconfig.Tick)
 	interval := apiconfig.Tick
@@ -203,7 +202,6 @@ func run(ctx context.Context, ipt apiban.IPTables, apiconfig apiban.Config, sigC
 			cnt++
 			// change the timeout to the one in the configuration
 			log.Println("ticker:", t)
-			//res, err := apiban.ApiRequest(apiconfig.Apikey, id, apiconfig.Version, apiconfig.Url, "banned")
 			bId, err = apiban.ApiBannedIP(bId, apiconfig.Token, apiconfig.Url, apiconfig.Lkid)
 			if err != nil {
 				log.Printf("failed to update blacklist: %s", err)
