@@ -204,13 +204,13 @@ func run(ctx context.Context, ipt apiban.IPTables, apiconfig apiban.Config, sigC
 			// change the timeout to the one in the configuration
 			log.Println("ticker:", t)
 			//res, err := apiban.ApiRequest(apiconfig.Apikey, id, apiconfig.Version, apiconfig.Url, "banned")
-			bId, err = apiban.ApiBannedIP(apiconfig.Apikey, bId, apiconfig.Version, apiconfig.Url, apiconfig.Lkid)
+			bId, err = apiban.ApiBannedIP(bId, apiconfig.Token, apiconfig.Url, apiconfig.Lkid)
 			if err != nil {
 				log.Printf("failed to update blacklist: %s", err)
 			}
-			aId, err = apiban.ApiAllowedIP(apiconfig.Apikey, aId, apiconfig.Version, apiconfig.Url, apiconfig.Lkid)
+			aId, err = apiban.ApiAllowedIP(aId, apiconfig.Token, apiconfig.Url, apiconfig.Lkid)
 			if err != nil {
-				log.Println("failed to update whitelist: %s", err)
+				log.Printf("failed to update whitelist: %s", err)
 			}
 		}
 		newTimeout := interval
