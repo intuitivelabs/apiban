@@ -243,7 +243,8 @@ func getTtlFromMetadata(metadata JSONMap) (ttl int, err error) {
 	err = nil
 
 	if metaTtl, ok := metadata["defaultBlacklistTtl"]; ok {
-		ttl, _ = metaTtl.(int)
+		floatTtl, _ := metaTtl.(float64)
+		ttl = int(floatTtl)
 		if ttl < 0 {
 			ttl = 0
 		}
