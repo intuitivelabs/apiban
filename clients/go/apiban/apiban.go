@@ -35,6 +35,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/intuitivelabs/anonymization"
@@ -84,6 +85,7 @@ var (
 	ErrEncryptWrongKey = errors.New("IP encrypted but wrong passphrase or encryption key configured")
 	// API JSON errors
 	ErrJsonMetadataDefaultBlacklistTtlMissing  = errors.New(`malformed JSON response: "defaultBlacklistTtl not present in metadata`)
+	ErrJsonMetadataGeneratedatMissing          = errors.New(`malformed JSON response: "lastTimestamp not present in metadata`)
 	ErrJsonMetadataDefaultBlacklistTtlDataType = errors.New(`malformed JSON response: "defaultBlacklistTtl has wrong data type`)
 	ErrJsonEncryptFieldNotString               = errors.New("malformed JSON response: encrypt field is not string in JSON")
 	ErrJsonEmptyIPAddressField                 = errors.New("malformed JSON response: IP address field is empty")
@@ -136,6 +138,7 @@ func isPlainTxt(code string) bool {
 
 func ApiRequestWithQueryValues(baseUrl, api string, values url.Values) (*IPResponse, error) {
 	var apiUrl string
+	var id string
 
 	startFrom := values.Get("timestamp")
 
@@ -165,22 +168,29 @@ func ApiRequestWithQueryValues(baseUrl, api string, values url.Values) (*IPRespo
 		return nil, nil
 	}
 
-	if e.ID == "" {
-		fmt.Println("e.ID empty")
-		return nil, errors.New("empty ID received")
-	}
-
+	// terminate the processing
 	if e.ID == "none" || len(e.IPs) == 0 {
 		// do not save the ID
 		return out, nil
+	}
+
+	if e.ID == "" {
+		log.Println("e.ID empty")
+		var timestamp int
+		if timestamp, err = getTimestampFromMetadata(e.Metadata); err != nil {
+			return nil, err
+		}
+		id = strconv.Itoa(timestamp)
+	} else {
+		id = e.ID
 	}
 
 	// store metadata
 	out.Metadata = e.Metadata
 
 	// Set the next ID and store it as state
-	out.ID = e.ID
-	GetState().Timestamp = e.ID
+	out.ID = id
+	GetState().Timestamp = id
 
 	// Aggregate the received IPs
 	out.IPs = append(out.IPs, e.IPs...)
@@ -234,6 +244,22 @@ func ApiRequest(key, startFrom, version, baseUrl, api string) (*IPResponse, erro
 	out.IPs = append(out.IPs, e.IPs...)
 
 	return out, nil
+}
+
+func getTimestampFromMetadata(metadata JSONMap) (timestamp int, err error) {
+	timestamp = 0
+	err = nil
+
+	if metaTimestamp, ok := metadata["lastTimestamp"]; ok {
+		floatTimestamp, _ := metaTimestamp.(float64)
+		timestamp = int(floatTimestamp)
+		if timestamp < 0 {
+			timestamp = 0
+		}
+		return
+	}
+	err = ErrJsonMetadataGeneratedatMissing
+	return
 }
 
 func getTtlFromMetadata(metadata JSONMap) (ttl int, err error) {
