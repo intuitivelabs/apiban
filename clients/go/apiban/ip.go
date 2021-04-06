@@ -112,7 +112,9 @@ type IPResponse struct {
 }
 
 func ApiIPReq(startFrom, token, baseUrl string, values url.Values) (*IPResponse, error) {
-	values.Add("token", token)
+	if len(token) > 0 {
+		values.Add("token", token)
+	}
 	if startFrom == "" {
 		startFrom = "100" // NOTE: arbitrary ID copied from reference source
 	}
