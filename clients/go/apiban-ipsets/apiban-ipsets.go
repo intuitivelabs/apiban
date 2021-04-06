@@ -164,14 +164,16 @@ func main() {
 	//	fmt.Print("Error", err)
 	//}
 	//fmt.Print("Content", content)
+	bannedApi := apiban.NewBannedApi(apiconfig.Lkid, apiconfig.Url, apiconfig.Token)
+	allowedApi := apiban.NewAllowedApi(apiconfig.Lkid, apiconfig.Url, apiconfig.Token)
 	fmt.Println("going to run in a looop")
-	if err := run(ctx, *iptables, *apiconfig, sigChan); err != nil {
+	if err := run(ctx, *iptables, *apiconfig, bannedApi, allowedApi, sigChan); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 	}
 	wg.Wait()
 }
 
-func run(ctx context.Context, ipt apiban.IPTables, apiconfig apiban.Config, sigChan chan os.Signal) error {
+func run(ctx context.Context, ipt apiban.IPTables, apiconfig apiban.Config, banned *apiban.Api, allowed *apiban.Api, sigChan chan os.Signal) error {
 	var err error
 	var bId, aId string
 	var cnt int
@@ -202,11 +204,11 @@ func run(ctx context.Context, ipt apiban.IPTables, apiconfig apiban.Config, sigC
 			cnt++
 			// change the timeout to the one in the configuration
 			log.Println("ticker:", t)
-			bId, err = apiban.ApiBannedIP(bId, apiconfig.Token, apiconfig.Url, apiconfig.Lkid)
+			bId, err = banned.Process(bId)
 			if err != nil {
 				log.Printf("failed to update blacklist: %s", err)
 			}
-			aId, err = apiban.ApiAllowedIP(aId, apiconfig.Token, apiconfig.Url, apiconfig.Lkid)
+			aId, err = allowed.Process(aId)
 			if err != nil {
 				log.Printf("failed to update whitelist: %s", err)
 			}

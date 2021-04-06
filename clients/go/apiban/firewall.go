@@ -37,6 +37,7 @@ var ipTables = &IPTables{}
 
 // errors
 var (
+	ErrNoIptables       = errors.New("iptables was not found")
 	ErrNoBlacklistFound = errors.New("ipset blacklist was not found")
 	ErrNoWhitelistFound = errors.New("ipset whitelist was not found")
 )
