@@ -279,8 +279,8 @@ func getTtlFromMetadata(metadata JSONMap) (ttl int, err error) {
 }
 
 // ProcResponse processes the response returned by the GET API.
-func ProcResponse(entry *IPResponse, id string, code APICode) {
-	if entry.ID == id || len(entry.IPs) == 0 {
+func ProcResponse(entry *IPResponse, api Api) {
+	if entry.ID == api.ConfigId || len(entry.IPs) == 0 {
 		log.Print("No new bans to add...")
 	}
 
@@ -291,7 +291,7 @@ func ProcResponse(entry *IPResponse, id string, code APICode) {
 	}
 	log.Print("ttl: ", ttl)
 	// process IP objects
-	procIP(entry.IPs, ttl, code)
+	procIP(entry.IPs, ttl, api)
 }
 
 // Check queries APIBAN.org to see if the provided IP address is blocked.
