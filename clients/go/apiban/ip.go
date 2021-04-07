@@ -162,6 +162,10 @@ func (api Api) Req(startFrom string) (*IPResponse, error) {
 	return api.RequestWithQueryValues()
 }
 
+func (api Api) Response(msg *IPResponse) {
+	ProcResponse(msg, api)
+}
+
 func (api Api) RequestWithQueryValues() (*IPResponse, error) {
 	var apiUrl string
 	var id string
@@ -247,7 +251,7 @@ func (api Api) Process(startFrom string) (id string, err error) {
 			err = ErrNoWhitelistFound
 			return
 		}
-		ProcResponse(res, api.ConfigId, api.Code)
+		api.Response(res)
 		id = res.ID
 	}
 	return
@@ -292,7 +296,7 @@ func ApiBannedIP(startFrom, token, baseUrl, configId string) (id string, err err
 		err = fmt.Errorf(`"banned" response with empty body`)
 	} else {
 		if IpTables() != nil && IpTables().Sets[IpTables().Bl] != nil {
-			ProcResponse(res, configId, APIBanned)
+			//ProcResponse(res, configId, APIBanned)
 			id = res.ID
 		}
 	}
@@ -311,7 +315,7 @@ func ApiAllowedIP(startFrom, token, baseUrl, configId string) (id string, err er
 		err = fmt.Errorf(`"allowed" response with empty body`)
 	} else {
 		if IpTables() != nil && IpTables().Sets[IpTables().Wl] != nil {
-			ProcResponse(res, configId, APIAllowed)
+			//ProcResponse(res, configId, APIAllowed)
 			id = res.ID
 		}
 	}
@@ -416,9 +420,9 @@ func ProcBannedResponse(entry *IPResponse, id string, blset ipset.IPSet) {
 	}
 }
 
-func procIP(ips []IPObj, ttl int, code APICode) {
+func procIP(ips []IPObj, ttl int, api Api) {
 	for _, s := range ips {
-		err := s.Process(ttl, code)
+		err := api.ResponseProc(&s, ttl)
 		if err != nil {
 			log.Printf("failed to process IP: %s", err.Error())
 		}
