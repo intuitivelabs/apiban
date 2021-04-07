@@ -90,6 +90,38 @@ var (
 	ErrJsonEmptyIPAddressField                 = errors.New("malformed JSON response: IP address field is empty")
 )
 
+func (metadata JSONMap) Ttl() (ttl int, err error) {
+	ttl = 0
+	err = nil
+
+	if metaTtl, ok := metadata["defaultBlacklistTtl"]; ok {
+		floatTtl, _ := metaTtl.(float64)
+		ttl = int(floatTtl)
+		if ttl < 0 {
+			ttl = 0
+		}
+		return
+	}
+	err = ErrJsonMetadataDefaultBlacklistTtlMissing
+	return
+}
+
+func (metadata JSONMap) Timestamp() (timestamp int, err error) {
+	timestamp = 0
+	err = nil
+
+	if metaTimestamp, ok := metadata["lastTimestamp"]; ok {
+		floatTimestamp, _ := metaTimestamp.(float64)
+		timestamp = int(floatTimestamp)
+		if timestamp < 0 {
+			timestamp = 0
+		}
+		return
+	}
+	err = ErrJsonMetadataGeneratedatMissing
+	return
+}
+
 func InitEncryption(c *Config) {
 	var (
 		err     error
