@@ -36,7 +36,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"time"
 
 	"github.com/intuitivelabs/anonymization"
 )
@@ -276,22 +275,6 @@ func getTtlFromMetadata(metadata JSONMap) (ttl int, err error) {
 	}
 	err = ErrJsonMetadataDefaultBlacklistTtlMissing
 	return
-}
-
-// ProcResponse processes the response returned by the GET API.
-func ProcResponse(entry *IPResponse, api Api) {
-	if entry.ID == api.ConfigId || len(entry.IPs) == 0 {
-		log.Print("No new bans to add...")
-	}
-
-	ttl := int(GetConfig().BlacklistTtl / time.Second) // round-down to seconds
-	if ttl == 0 {
-		// try to get the ttl from the answers metadata
-		ttl, _ = getTtlFromMetadata(entry.Metadata)
-	}
-	log.Print("ttl: ", ttl)
-	// process IP objects
-	procIP(entry.IPs, ttl, api)
 }
 
 // Check queries APIBAN.org to see if the provided IP address is blocked.
