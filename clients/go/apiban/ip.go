@@ -125,7 +125,7 @@ func (msg *IPResponse) Process(api Api) {
 	ttl := int(GetConfig().BlacklistTtl / time.Second) // round-down to seconds
 	if ttl == 0 {
 		// try to get the ttl from the answers metadata
-		ttl, _ = getTtlFromMetadata(msg.Metadata)
+		ttl, _ = msg.Metadata.Ttl()
 	}
 	log.Print("ttl: ", ttl)
 	// process IP objects
@@ -227,7 +227,7 @@ func (api Api) RequestWithQueryValues() (*IPResponse, error) {
 	if e.ID == "" {
 		log.Println("e.ID empty")
 		var timestamp int
-		if timestamp, err = getTimestampFromMetadata(e.Metadata); err != nil {
+		if timestamp, err = e.Metadata.Timestamp(); err != nil {
 			return nil, err
 		}
 		id = strconv.Itoa(timestamp)
