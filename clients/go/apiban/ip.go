@@ -137,6 +137,10 @@ func (ip *IPObj) Decrypt() (string, error) {
 	return "", ErrJsonEmptyIPAddressField
 }
 
+type Response interface {
+	Process(Api) error
+}
+
 // IPResponse describes a set of blocked IP addresses from APIBAN.org
 type IPResponse struct {
 	Metadata JSONMap `json:"metadata"`
@@ -149,9 +153,10 @@ type IPResponse struct {
 }
 
 // ProcResponse processes the response returned by the GET API.
-func (msg *IPResponse) Process(api Api) {
+func (msg *IPResponse) Process(api Api) error {
 	if msg.ID == api.ConfigId || len(msg.IPs) == 0 {
 		log.Print("No new bans to add...")
+		return nil
 	}
 
 	ttl := GetConfig().BlacklistTtl
@@ -163,6 +168,7 @@ func (msg *IPResponse) Process(api Api) {
 	log.Print("ttl: ", ttl)
 	// process IP objects
 	msg.procIP(ttl, api)
+	return nil
 }
 
 func (msg *IPResponse) procIP(ttl time.Duration, api Api) {
@@ -278,7 +284,7 @@ func (api Api) RequestWithQueryValues() (*IPResponse, error) {
 	return out, nil
 }
 
-func (api Api) Response(msg *IPResponse) {
+func (api Api) Response(msg Response) {
 	msg.Process(api)
 }
 
