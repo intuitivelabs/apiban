@@ -175,13 +175,8 @@ func main() {
 
 func run(ctx context.Context, ipt apiban.IPTables, apiconfig apiban.Config, banned *apiban.Api, allowed *apiban.Api, sigChan chan os.Signal) error {
 	var err error
-	var bId, aId string
 	var cnt int
 	// use the last timestamp saved in the state file (if non zero)
-	if bId = apiban.GetState().Timestamp; bId == "" {
-		bId = apiconfig.Lkid
-	}
-	aId = bId
 	// Get list of banned ip's from APIBAN.org
 	fmt.Println("URL", apiconfig.Url)
 	fmt.Print("TICK", apiconfig.Tick)
@@ -204,11 +199,11 @@ func run(ctx context.Context, ipt apiban.IPTables, apiconfig apiban.Config, bann
 			cnt++
 			// change the timeout to the one in the configuration
 			log.Println("ticker:", t)
-			bId, err = banned.Process(bId)
+			err = banned.Process()
 			if err != nil {
 				log.Printf("failed to update blacklist: %s", err)
 			}
-			aId, err = allowed.Process(aId)
+			err = allowed.Process()
 			if err != nil {
 				log.Printf("failed to update whitelist: %s", err)
 			}
