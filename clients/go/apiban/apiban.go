@@ -83,6 +83,7 @@ var (
 	ErrEncryptNoKey    = errors.New("IP encrypted but no passphrase or encryption key configured")
 	ErrEncryptWrongKey = errors.New("IP encrypted but wrong passphrase or encryption key configured")
 	// API JSON errors
+	ErrJsonParser                              = errors.New(`cannot parse JSON response`)
 	ErrJsonMetadataDefaultBlacklistTtlMissing  = errors.New(`malformed JSON response: "defaultBlacklistTtl not present in metadata`)
 	ErrJsonMetadataGeneratedatMissing          = errors.New(`malformed JSON response: "lastTimestamp not present in metadata`)
 	ErrJsonMetadataDefaultBlacklistTtlDataType = errors.New(`malformed JSON response: "defaultBlacklistTtl has wrong data type`)
