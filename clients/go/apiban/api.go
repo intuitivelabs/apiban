@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// Response should be implemented by all processors for JSON responses
+// Response should be implemented by all processors for API JSON responses
 type Response interface {
 	Process(*Api) error
 }
@@ -60,9 +60,6 @@ var (
 	// blocked (when calling Check) and that the list is complete (when calling
 	// Banned)
 	ErrBadRequest = errors.New("Bad Request")
-	// encryption errors
-	ErrEncryptNoKey    = errors.New("IP encrypted but no passphrase or encryption key configured")
-	ErrEncryptWrongKey = errors.New("IP encrypted but wrong passphrase or encryption key configured")
 	// API JSON errors
 	ErrJsonParser                              = errors.New(`cannot parse JSON response`)
 	ErrJsonMetadataDefaultBlacklistTtlMissing  = errors.New(`malformed JSON response: "defaultBlacklistTtl not present in metadata`)
@@ -124,6 +121,7 @@ var (
 	}
 )
 
+// NewBannedApi returns an initialized Api object which can be used for retrieving blacklisted IP addresses
 func NewBannedApi(configId, baseUrl, token string) *Api {
 	bannedApi.init(configId, baseUrl, "bwnoa/v4list", token, APIBanned)
 	bannedApi.Values.Add("list", "ipblack")
@@ -131,6 +129,7 @@ func NewBannedApi(configId, baseUrl, token string) *Api {
 	return &bannedApi
 }
 
+// NewAllowedApi returns an initialized Api object which can be used for retrieving whitelisted IP addresses
 func NewAllowedApi(configId, baseUrl, token string) *Api {
 	allowedApi.init(configId, baseUrl, "bwnoa/v4list", token, APIAllowed)
 	allowedApi.Values.Add("list", "ipwhite")
@@ -138,12 +137,14 @@ func NewAllowedApi(configId, baseUrl, token string) *Api {
 	return &allowedApi
 }
 
+// NewUriApi returns an initialized Api object which can be used for retrieving URIs
 func NewUriApi(configId, baseUrl, token string) *Api {
 	uriApi.init(configId, baseUrl, "bwnoa/v4list", token, APIUri)
 	uriApi.Values.Add("list", "uri")
 	return &uriApi
 }
 
+// init the members of Api data structure
 func (api *Api) init(configId, baseUrl, path, token string, code APICode) {
 	for k, _ := range api.Values {
 		delete(api.Values, k)
@@ -161,6 +162,8 @@ func (api *Api) init(configId, baseUrl, path, token string, code APICode) {
 	}
 }
 
+// Request sends an API request by encoding the URL and using after that Get().
+// If "timestamp" is an empty string it sets it to 0
 func (api *Api) Request() (Response, error) {
 	if api.Timestamp == "" {
 		// start from 0 if an empty start timestamp was provided
@@ -170,6 +173,7 @@ func (api *Api) Request() (Response, error) {
 	return api.RequestWithQueryValues()
 }
 
+// RequestWithQueryValues sends an API request by encoding the URL and using after that Get().
 func (api *Api) RequestWithQueryValues() (Response, error) {
 	var apiUrl string
 
@@ -195,11 +199,12 @@ func (api *Api) RequestWithQueryValues() (Response, error) {
 
 }
 
+// Response processes the answer received from the API server
 func (api *Api) Response(msg Response) {
 	msg.Process(api)
 }
 
-// ApiBannedIP sends an HTTP request and processes the received request; it returns the "id" that should be used in the next request.
+// Process sends an HTTP request and processes the received request.
 // It uses an URL built like this from the input parameters:
 // https://baseUrl/key/banned/startFrom?version=version
 func (api *Api) Process() (err error) {
@@ -209,18 +214,6 @@ func (api *Api) Process() (err error) {
 	} else if res == nil {
 		err = fmt.Errorf(`%s response with empty body`, api.Path)
 	} else {
-		if IpTables() == nil {
-			err = ErrNoIptables
-			return
-		}
-		if api.Code == APIBanned && IpTables().Sets[IpTables().Bl] == nil {
-			err = ErrNoBlacklistFound
-			return
-		}
-		if api.Code == APIAllowed && IpTables().Sets[IpTables().Wl] == nil {
-			err = ErrNoWhitelistFound
-			return
-		}
 		api.Response(res)
 	}
 	return
@@ -277,11 +270,12 @@ type Resource interface {
 	Process(ttl time.Duration, api APICode) error
 }
 
-// generic response object used for unmarshalling either IPObj or URIObj
+// generic response object used for unmarshalling either IP or URI JSON objects
 type Element struct {
 	r Resource
 }
 
+// UnmarshalJSON decodes the element by using trial and error between IP and URI JSON objects
 func (elem *Element) UnmarshalJSON(msg []byte) error {
 	var (
 		ip  IP
