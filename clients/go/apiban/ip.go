@@ -50,13 +50,14 @@ func decryptIp(encrypted string, kvCode interface{}) (decrypted string, err erro
 	return
 }
 
-// IPObj JSON objects in API responses
-type IPObj struct {
+// IP Resource JSON objects in API responses.
+// It represents IPs of blocked/allowed IP addresses
+type IP struct {
 	Encrypt string `json:"encrypt"`
-	IP      string `json:"ipaddr"`
+	Ipaddr  string `json:"ipaddr"`
 }
 
-type IpVector []IPObj
+type IpVector []IP
 
 func (ips IpVector) Decrypt(plainTxt []string) int {
 	var (
@@ -88,7 +89,7 @@ func (ips IpVector) Blacklist(ttl time.Duration) error {
 	return GetFirewall().AddToBlacklist(plainTxt[0:n], ttl)
 }
 
-func (ip *IPObj) Process(ttl time.Duration, api APICode) error {
+func (ip *IP) Process(ttl time.Duration, api APICode) error {
 	switch api {
 	case APIBanned:
 		return ip.Blacklist(ttl)
@@ -98,7 +99,7 @@ func (ip *IPObj) Process(ttl time.Duration, api APICode) error {
 	return fmt.Errorf("unknown API: %d", api)
 }
 
-func (ip *IPObj) Whitelist(ttl time.Duration) error {
+func (ip *IP) Whitelist(ttl time.Duration) error {
 	var (
 		err   error
 		ipStr string
@@ -111,7 +112,7 @@ func (ip *IPObj) Whitelist(ttl time.Duration) error {
 	return err
 }
 
-func (ip *IPObj) Blacklist(ttl time.Duration) error {
+func (ip *IP) Blacklist(ttl time.Duration) error {
 	var (
 		err   error
 		ipStr string
@@ -124,9 +125,9 @@ func (ip *IPObj) Blacklist(ttl time.Duration) error {
 	return err
 }
 
-func (ip *IPObj) Decrypt() (string, error) {
-	if len(ip.IP) > 0 {
-		return decryptIp(ip.IP, ip.Encrypt)
+func (ip *IP) Decrypt() (string, error) {
+	if len(ip.Ipaddr) > 0 {
+		return decryptIp(ip.Ipaddr, ip.Encrypt)
 	}
 	return "", ErrJsonEmptyIPAddressField
 }
@@ -139,7 +140,7 @@ type IPResponse struct {
 	ID string `json:"ID,omitempty"`
 
 	// IPs is the list of blocked/allowed IP addresses in this entry
-	IPs []IPObj `json:"elements"`
+	IPs []IP `json:"elements"`
 }
 
 // ProcResponse processes the response returned by the GET API.
