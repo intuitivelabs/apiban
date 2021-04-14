@@ -3,9 +3,7 @@ package apiban
 import (
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/intuitivelabs/anonymization"
 )
@@ -50,13 +48,14 @@ func decryptIp(encrypted string, kvCode interface{}) (decrypted string, err erro
 	return
 }
 
-// IPObj JSON objects in API responses
-type IPObj struct {
+// IP Resource JSON objects in API responses.
+// It represents IPs of blocked/allowed IP addresses
+type IP struct {
 	Encrypt string `json:"encrypt"`
-	IP      string `json:"ipaddr"`
+	Ipaddr  string `json:"ipaddr"`
 }
 
-func (ip *IPObj) Process(ttl int, api APICode) error {
+func (ip *IP) Process(ttl int, api APICode) error {
 	switch api {
 	case APIBanned:
 		return ip.Blacklist(ttl)
@@ -66,7 +65,7 @@ func (ip *IPObj) Process(ttl int, api APICode) error {
 	return fmt.Errorf("unknown API: %d", api)
 }
 
-func (ip *IPObj) Whitelist(ttl int) error {
+func (ip *IP) Whitelist(ttl int) error {
 	var (
 		err   error
 		ipStr string
@@ -79,7 +78,7 @@ func (ip *IPObj) Whitelist(ttl int) error {
 	return err
 }
 
-func (ip *IPObj) Blacklist(ttl int) error {
+func (ip *IP) Blacklist(ttl int) error {
 	var (
 		err   error
 		ipStr string
@@ -92,53 +91,9 @@ func (ip *IPObj) Blacklist(ttl int) error {
 	return err
 }
 
-func (ip *IPObj) Decrypt() (string, error) {
-	if len(ip.IP) > 0 {
-		return decryptIp(ip.IP, ip.Encrypt)
+func (ip *IP) Decrypt() (string, error) {
+	if len(ip.Ipaddr) > 0 {
+		return decryptIp(ip.Ipaddr, ip.Encrypt)
 	}
 	return "", ErrJsonEmptyIPAddressField
-}
-
-// IPResponse describes the response for bwnoa/v4list API
-type IPResponse struct {
-	Metadata JSONMap `json:"metadata"`
-
-	// ID is the timestamp of the next IPResponse
-	ID string `json:"ID,omitempty"`
-
-	// IPs is the list of blocked/allowed IP addresses in this entry
-	IPs []IPObj `json:"elements"`
-}
-
-// ProcResponse processes the response returned by the GET API.
-func (msg *IPResponse) Process(api *Api) error {
-	if len(msg.IPs) == 0 {
-		log.Print("No new bans to add...")
-		return nil
-	}
-
-	ttl := int(GetConfig().BlacklistTtl / time.Second) // round-down to seconds
-	if ttl == 0 {
-		// try to get the ttl from the answers metadata
-		ttl, _ = msg.Metadata.Ttl()
-	}
-	log.Print("ttl: ", ttl)
-	if timestamp, err := msg.Metadata.Timestamp(); err != nil {
-		return err
-	} else {
-		api.Timestamp = strconv.Itoa(timestamp)
-	}
-
-	// process IP objects
-	msg.procIP(ttl, api)
-	return nil
-}
-
-func (msg *IPResponse) procIP(ttl int, api *Api) {
-	for _, s := range msg.IPs {
-		err := api.ResponseProc(&s, ttl)
-		if err != nil {
-			log.Printf("failed to process IP: %s", err.Error())
-		}
-	}
 }
