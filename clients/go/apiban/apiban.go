@@ -22,72 +22,15 @@
 package apiban
 
 import (
-	"crypto"
-	"crypto/cipher"
-	"crypto/subtle"
-	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log"
-
-	"github.com/intuitivelabs/anonymization"
 )
 
 var (
 	// RootURL is the base URI of the intuitive labs server
 	RootURL = "https://siem.intuitivelabs.com/"
 )
-
-// anonymization objects
-var (
-	Ipcipher  cipher.Block            = nil
-	Validator anonymization.Validator = nil
-)
-
-func InitEncryption(c *Config) {
-	var (
-		err     error
-		encKey  [anonymization.EncryptionKeyLen]byte
-		authKey [anonymization.AuthenticationKeyLen]byte
-	)
-	if c == nil {
-		log.Fatalln("Cannot initialize anonymizer module. Exiting.")
-		return
-	}
-	if len(c.Passphrase) == 0 && len(c.EncryptionKey) == 0 {
-		log.Print("Neither passphrase nor encryption key provided; anonymization module is not initialized.")
-		return
-	}
-	if len(c.Passphrase) > 0 {
-		// generate encryption key from passphrase
-		anonymization.GenerateKeyFromPassphraseAndCopy(c.Passphrase,
-			anonymization.EncryptionKeyLen, encKey[:])
-		log.Print("encryption key: ", hex.EncodeToString(encKey[:]))
-	} else if len(c.EncryptionKey) > 0 {
-		// use the configured encryption key
-		// copy the configured key into the one used during realtime processing
-		if decoded, err := hex.DecodeString(c.EncryptionKey); err != nil {
-			log.Fatalln("Cannot initialize ipcipher. Exiting.")
-		} else {
-			subtle.ConstantTimeCopy(1, encKey[:], decoded)
-		}
-	}
-	// generate authentication (HMAC) key from encryption key
-	anonymization.GenerateKeyFromBytesAndCopy(encKey[:], anonymization.AuthenticationKeyLen, authKey[:])
-	// initialize a validator using the configured passphrase; neither length nor salt are used since this validator verifies only the remote code
-	if Validator, err = anonymization.NewKeyValidator(crypto.SHA256, authKey[:], 5 /*length*/, "" /*salt*/, anonymization.NonceNone, false /*withNonce*/, true /*pre-allocated HMAC*/); err != nil {
-		log.Fatalln("Cannot initialize validator. Exiting.")
-	}
-	if Ipcipher, err = anonymization.NewCipher(encKey[:]); err != nil {
-		log.Fatalln("Cannot initialize ipcipher. Exiting.")
-	} else {
-		Ipcipher = Ipcipher.(*anonymization.Ipcipher)
-	}
-}
-
-func isPlainTxt(code string) bool {
-	return (code == "0") || (code == "plain")
-}
 
 // Check queries APIBAN.org to see if the provided IP address is blocked.
 /*
