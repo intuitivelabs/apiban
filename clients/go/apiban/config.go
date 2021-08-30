@@ -85,7 +85,7 @@ func LoadConfig() (*Config, error) {
 		}
 		if cfgFileCnt > 10 {
 			errCfgFile = fmt.Errorf("too many config files loaded"+
-				" (%d, current %w)", cfgFileCnt, f)
+				" (%d, current %s)", cfgFileCnt, f)
 			return
 		}
 		fmt.Printf("loading config file %q ...\n", f)
