@@ -5,13 +5,30 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os/exec"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/vladabroz/go-ipset/ipset"
+
+	"github.com/google/nftables"
+	//"github.com/google/nftables/binaryutil"
+	"github.com/google/nftables/expr"
 )
+
+type Table struct {
+	// name of the table used for firewall rules
+	name string
+	// chain within the table used as target by firewall rules
+	chain string
+	// name of the ipset set of addresses for blacklisting
+	Bl string
+	// name of the ipset set of addresses for whitelisting
+	Wl string
+}
 
 type IPTables struct {
 	// table used for firewall rules
@@ -34,6 +51,10 @@ type IPTables struct {
 }
 
 var ipTables = &IPTables{}
+
+const (
+	MaxSetSize = 1024
+)
 
 // errors
 var (
@@ -65,7 +86,7 @@ func checkIPSet(ipsetname string) (bool, error) {
 	fmt.Printf("combined out:\n%s\n", string(xmlout))
 	// read our opened xmlFile as a byte array.
 	//byteValue, _ := ioutil.ReadAll(xmlFile)
-	fmt.Println("Type of xmlout %s", reflect.TypeOf(xmlout))
+	fmt.Println("Type of xmlout", reflect.TypeOf(xmlout))
 
 	//testxml := xml.Unmarshal(xmlout, &ipsets)
 	if err := xml.Unmarshal(xmlout, &ipsets); err != nil {
@@ -273,4 +294,399 @@ func InitializeIPTables(chain, bl, wl string, dryRun bool) (*IPTables, error) {
 
 func IpTables() *IPTables {
 	return ipTables
+}
+
+// set indeces
+type SetIdx int
+
+// indeces for nftables sets
+const (
+	BlSet SetIdx = iota
+	WlSet
+)
+
+// indeces for nftables rules
+const (
+	FwdRuleIdx = iota
+	InRuleIdx
+	WlRuleIdx
+	BlRuleIdx
+)
+
+type NFTables struct {
+	// is it dry run? (no commits to the kernel)
+	DryRun bool
+	// filtering table
+	Table *nftables.Table
+
+	// chains
+	// forwarding chain
+	FwdChain *nftables.Chain
+	// input chain
+	InChain *nftables.Chain
+	// chain used as jump target
+	TgtChain *nftables.Chain
+
+	// sets
+	Sets [2]*nftables.Set
+
+	// expressions used in rules
+	JmpTargetExpr []expr.Any
+	DropBlExpr    []expr.Any
+	AcceptWlExpr  []expr.Any
+
+	// rules
+	Rules [4]*nftables.Rule
+
+	// connection to netlink sockets
+	Conn *nftables.Conn
+}
+
+func newNFTables(table, fwdChain, inChain, target, bl, wl string) *NFTables {
+
+	// initialize the table used for ip address filtering
+	nft := &NFTables{
+		// system table used for packet filtering (e.g., 'filter')
+		Table: &nftables.Table{
+			Family: nftables.TableFamilyIPv4,
+			Name:   table,
+		},
+		Conn: &nftables.Conn{},
+	}
+
+	// initialize chains
+	// system chain used for packet forwarding (e.g., 'FORWARD')
+	nft.FwdChain = &nftables.Chain{
+		Table:    nft.Table,
+		Name:     fwdChain,
+		Type:     nftables.ChainTypeFilter,
+		Hooknum:  nftables.ChainHookPrerouting,
+		Priority: nftables.ChainPriorityFilter,
+	}
+	// system chain used for packet input processing (e.g., 'INPUT')
+	nft.InChain = &nftables.Chain{
+		Table:    nft.Table,
+		Name:     inChain,
+		Type:     nftables.ChainTypeFilter,
+		Hooknum:  nftables.ChainHookPrerouting,
+		Priority: nftables.ChainPriorityFilter,
+	}
+	// chain which contains blacklist and whitelist rules; it is used as jump target
+	nft.TgtChain = &nftables.Chain{
+		Table: nft.Table,
+		Name:  target,
+		Type:  "",
+	}
+
+	// initialize sets
+	nft.Sets[BlSet] = &nftables.Set{
+		Table:      nft.Table,
+		Name:       bl,
+		HasTimeout: true,
+		KeyType:    nftables.TypeIPAddr,
+	}
+	nft.Sets[WlSet] = &nftables.Set{
+		Table:      nft.Table,
+		Name:       wl,
+		HasTimeout: true,
+		KeyType:    nftables.TypeIPAddr,
+	}
+
+	// initialize expressions
+	// expression for jumping to the chain target
+	nft.JmpTargetExpr = []expr.Any{
+		&expr.Verdict{
+			Kind:  expr.VerdictJump,
+			Chain: target,
+		},
+	}
+	// expression for dropping the blacklisted addresses
+	nft.DropBlExpr = []expr.Any{
+		&expr.Payload{
+			// payload load 4b @ network header + 12 => reg 1
+			DestRegister: 1,
+			Base:         expr.PayloadBaseNetworkHeader,
+			Offset:       12,
+			Len:          4,
+		},
+		&expr.Lookup{
+			SourceRegister: 1,
+			SetName:        nft.Sets[BlSet].Name,
+			SetID:          nft.Sets[BlSet].ID,
+		},
+		&expr.Counter{},
+		&expr.Verdict{
+			Kind: expr.VerdictDrop,
+		},
+	}
+	// expression for accepting the whitelisted addresses
+	nft.AcceptWlExpr = []expr.Any{
+		&expr.Payload{
+			// payload load 4b @ network header + 12 => reg 1
+			DestRegister: 1,
+			Base:         expr.PayloadBaseNetworkHeader,
+			Offset:       12,
+			Len:          4,
+		},
+		&expr.Lookup{
+			SourceRegister: 1,
+			SetName:        nft.Sets[WlSet].Name,
+			SetID:          nft.Sets[WlSet].ID,
+		},
+		&expr.Counter{},
+		&expr.Verdict{
+			Kind: expr.VerdictAccept,
+		},
+	}
+
+	// initialize rules
+	// rule used for jumping from forwarding chain to the target chain
+	nft.Rules[FwdRuleIdx] = &nftables.Rule{
+		Table: nft.Table,
+		Chain: nft.FwdChain,
+		// TODO: should be '0'
+		//Position: 1,
+		Exprs: nft.JmpTargetExpr,
+	}
+	// rule used for jumping from input chain to the target chain
+	nft.Rules[InRuleIdx] = &nftables.Rule{
+		Table: nft.Table,
+		Chain: nft.InChain,
+		// TODO: should be '0'
+		//Position: 1,
+		Exprs: nft.JmpTargetExpr,
+	}
+	// rule used for accepting packets with saddr matching wl set
+	nft.Rules[WlRuleIdx] = &nftables.Rule{
+		Table: nft.Table,
+		Chain: nft.TgtChain,
+		Exprs: nft.AcceptWlExpr,
+	}
+	// rule used for dropping packets with saddr matching bl set
+	nft.Rules[BlRuleIdx] = &nftables.Rule{
+		Table: nft.Table,
+		Chain: nft.TgtChain,
+		Exprs: nft.DropBlExpr,
+	}
+
+	return nft
+}
+
+func InitializeNFTables(table, fwdChain, inChain, target, bl, wl string) (*NFTables, error) {
+
+	nft := newNFTables(table, fwdChain, inChain, target, bl, wl)
+
+	if err := nft.addSetsAndFlush(); err != nil {
+		return nil, fmt.Errorf("nftables intialization error: %w", err)
+	}
+
+	// create the user-defined chain for the firewall.
+	log.Printf(`add chain "%s" in table "%s"`, target, nft.Table.Name)
+	if err := nft.addChainAndFlush(); err != nil {
+		// TODO: rollback
+		return nil, fmt.Errorf("nftables intialization error: %w", err)
+	}
+
+	if err := nft.addRulesAndFlush(); err != nil {
+		// TODO: rollback
+		return nil, fmt.Errorf("nftables intialization error: %w", err)
+	}
+
+	return nft, nil
+}
+
+func addIpsToSetElements(ips []string, timeout time.Duration, elements []nftables.SetElement) int {
+	var (
+		i  int
+		ip string
+	)
+	for i, ip = range ips {
+		if i == len(elements) {
+			break
+		}
+		elements[i] = nftables.SetElement{
+			Key:     []byte(net.ParseIP(ip).To4()),
+			Timeout: timeout,
+		}
+	}
+
+	return i
+}
+
+func (nft *NFTables) getFirstRule(chain *nftables.Chain) (handle uint64, err error) {
+	var (
+		rules []*nftables.Rule
+	)
+	if nft.DryRun {
+		return 0, nil
+	}
+	if rules, err = nft.Conn.GetRule(nft.Table, chain); err != nil {
+		return 0, fmt.Errorf("could not get rules from table %s chain %s: %w",
+			nft.Table.Name, chain.Name, err)
+	}
+	if len(rules) == 0 {
+		return 0, nil
+	}
+	return rules[0].Handle, nil
+}
+
+// addSetsAndFlush commits the sets into the kernel
+func (nft *NFTables) addSetsAndFlush() error {
+	// add sets
+	for _, set := range nft.Sets {
+		if err := nft.Conn.AddSet(set, nil); err != nil {
+			return fmt.Errorf("AddSet (%s) failed: %w", set.Name, err)
+		}
+	}
+
+	if !nft.DryRun {
+		if err := nft.Conn.Flush(); err != nil {
+			return fmt.Errorf(`commiting sets to kernel failed: %w`, err)
+		}
+	}
+
+	return nil
+}
+
+// delSetsAndFlush deletes the rules from the kernel
+func (nft *NFTables) delSetsAndFlush() error {
+	// add sets
+	for _, set := range nft.Sets {
+		nft.Conn.DelSet(set)
+	}
+
+	if !nft.DryRun {
+		if err := nft.Conn.Flush(); err != nil {
+			return fmt.Errorf(`deleting sets from the kernel failed: %w`, err)
+		}
+	}
+
+	return nil
+}
+
+// addChainAndFlush commits the target chain into the kernel
+func (nft *NFTables) addChainAndFlush() error {
+	// add chain
+	nft.Conn.AddChain(nft.TgtChain)
+
+	if !nft.DryRun {
+		if err := nft.Conn.Flush(); err != nil {
+			return fmt.Errorf(`"%s" table "%s" chain add - commit to kernel failed: %w`, nft.Table.Name, nft.TgtChain.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// delChainAndFlush deletes the target chain form the kernel
+func (nft *NFTables) delChainAndFlush() error {
+	// add chain
+	nft.Conn.DelChain(nft.TgtChain)
+
+	if !nft.DryRun {
+		if err := nft.Conn.Flush(); err != nil {
+			return fmt.Errorf(`"%s" table "%s" chain delete - commit to kernel failed: %w`, nft.Table.Name, nft.TgtChain.Name, err)
+		}
+	}
+
+	return nil
+}
+
+// addRulesAndFlush commits the rules into the kernel
+func (nft *NFTables) addRulesAndFlush() error {
+	var (
+		err    error
+		hf, hi uint64
+	)
+	if hf, err = nft.getFirstRule(nft.FwdChain); err != nil {
+		return fmt.Errorf(`could not get first rule in "%s" table "%s" chain: %w`,
+			nft.Table.Name, nft.FwdChain.Name, err)
+	}
+	nft.Rules[FwdRuleIdx].Handle = hf
+	if hi, err = nft.getFirstRule(nft.InChain); err != nil {
+		return fmt.Errorf(`could not get first rule in "%s" table "%s" chain: %w`,
+			nft.Table.Name, nft.InChain.Name, err)
+	}
+	nft.Rules[InRuleIdx].Handle = hi
+	for _, rule := range nft.Rules {
+		nft.Conn.AddRule(rule)
+	}
+	if !nft.DryRun {
+		if err := nft.Conn.Flush(); err != nil {
+			// TODO: rollback
+			return fmt.Errorf(`"%s" table rule add - commit to kernel failed: %w`,
+				nft.Table.Name, err)
+		}
+	}
+	return nil
+}
+
+func (nft *NFTables) getSet(idx SetIdx) *nftables.Set {
+	switch idx {
+	case BlSet:
+		return nft.Sets[BlSet]
+	case WlSet:
+		return nft.Sets[WlSet]
+	default:
+		return nil
+	}
+}
+
+func (nft *NFTables) setAddElements(idx SetIdx, elements []nftables.SetElement) (err error) {
+	var i int
+	for i = 0; i < len(elements)/MaxSetSize; i++ {
+		if err = nft.setAddElementsAndFlush(idx, elements[i*MaxSetSize:(i+1)*MaxSetSize]); err != nil {
+			return fmt.Errorf(`adding elements to set failed: %w`, err)
+		}
+	}
+	if len(elements) > i*MaxSetSize {
+		if err = nft.setAddElementsAndFlush(idx, elements[i*MaxSetSize:len(elements)]); err != nil {
+			return fmt.Errorf(`adding elements to set failed: %w`, err)
+		}
+	}
+	return nil
+}
+
+func (nft *NFTables) setAddElementsAndFlush(idx SetIdx, elements []nftables.SetElement) (err error) {
+	set := nft.getSet(idx)
+	if set == nil {
+		return fmt.Errorf(`bad set index %d`, idx)
+	}
+	nft.Conn.SetAddElements(set, elements)
+	if !nft.DryRun {
+		if err = nft.Conn.Flush(); err != nil {
+			return fmt.Errorf(`commiting set elements to kernel failed: %w`, err)
+		}
+	}
+	return nil
+}
+
+func (nft *NFTables) addIpsToSet(idx SetIdx, ips []string, timeout time.Duration) error {
+	var elements [2 * MaxSetSize]nftables.SetElement
+	set := nft.getSet(idx)
+	if set == nil {
+		return fmt.Errorf(`bad set index %d`, idx)
+	}
+	l, i := 0, 0
+	for i = 0; i < len(ips); i += l {
+		l = addIpsToSetElements(ips[i:], timeout, elements[:])
+		if l == 0 {
+			break
+		}
+		if err := nft.setAddElements(idx, elements[0:l]); err != nil {
+			return fmt.Errorf(`%w`, err)
+		}
+		if l >= len(ips[i:]) {
+			break
+		}
+	}
+	return nil
+}
+
+func (nft *NFTables) AddToWhitelist(ips []string, timeout time.Duration) error {
+	return nft.addIpsToSet(WlSet, ips, timeout)
+}
+
+func (nft *NFTables) AddToBlacklist(ips []string, timeout time.Duration) error {
+	return nft.addIpsToSet(BlSet, ips, timeout)
 }
