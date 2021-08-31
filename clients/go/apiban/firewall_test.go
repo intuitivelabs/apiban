@@ -2,6 +2,8 @@ package apiban
 
 import (
 	"errors"
+	"fmt"
+	"github.com/google/nftables"
 	"strconv"
 	"testing"
 	"time"
@@ -39,9 +41,10 @@ func generateAddrRange(prefix string, size int) ([]string, error) {
 
 func TestNftables(t *testing.T) {
 	var (
-		err error
-		ips []string
-		nft *NFTables
+		err     error
+		ips     []string
+		nft     *NFTables
+		cleanup bool = true
 	)
 	if ips, err = generateAddrRange("10", 10); err != nil {
 		t.Fatalf("could not generate address range %s", err)
@@ -54,6 +57,52 @@ func TestNftables(t *testing.T) {
 		nft, err = InitializeNFTables("filter", "FORWARD", "INPUT", "MONITORING", "blacklist", "whitelist")
 		if err != nil {
 			t.Fatalf("%s", err)
+		}
+		if nft == nil {
+			t.Fatalf("nftables was not correctly initialized")
+		}
+		if chains, err := nft.Conn.ListChains(); err != nil {
+			t.Fatalf("%s", err)
+		} else {
+			// check that the target chain was created
+			var chain *nftables.Chain
+			for _, chain = range chains {
+				if chain.Name == "MONITORING" {
+					break
+				}
+			}
+			if chain == nil || chain.Name != "MONITORING" || chain.Table.Name != nft.Table.Name {
+				t.Fatalf(`chain "MONITORING" was not properly created`)
+			}
+			if rule, err := nft.getFirstRule(nft.FwdChain); err != nil {
+				t.Fatalf(`get rules failure %s`, err)
+			} else {
+				if !areRulesEqual(rule, nft.Rules[FwdRuleIdx], true) {
+					t.Fatalf(`rules mismatch in chain %s`, nft.FwdChain.Name)
+				}
+			}
+			if rule, err := nft.getFirstRule(nft.InChain); err != nil {
+				t.Fatalf(`get rules failure %s`, err)
+			} else {
+				if !areRulesEqual(rule, nft.Rules[InRuleIdx], true) {
+					t.Fatalf(`rules mismatch in chain %s`, nft.InChain.Name)
+				}
+			}
+			if rules, err := nft.Conn.GetRule(nft.Table, chain); err != nil {
+				t.Fatalf(`cannot get rules for table %s chain %s: %s`, nft.Table.Name, chain.Name, err)
+			} else {
+				if len(rules) < 2 {
+					t.Fatalf(`invalid number of rules for table %s chain %s`, nft.Table.Name, chain.Name)
+				}
+				for i, rule := range rules {
+					if i > 1 {
+						break
+					}
+					if !areRulesEqual(rule, nft.Rules[i+WlRuleIdx], true) {
+						t.Fatalf(`mismatching rules for table %s chain %s`, nft.Table.Name, chain.Name)
+					}
+				}
+			}
 		}
 	})
 	t.Run("blacklist", func(t *testing.T) {
@@ -72,4 +121,15 @@ func TestNftables(t *testing.T) {
 			t.Fatalf("could not add ip to set %s", err)
 		}
 	})
+	if cleanup && nft != nil {
+		if err = nft.delRulesAndFlush(); err != nil {
+			fmt.Printf("cleanup failed: %s\n", err)
+		}
+		if err = nft.delTgtChainAndFlush(); err != nil {
+			fmt.Printf("cleanup failed: %s\n", err)
+		}
+		if err = nft.delSetsAndFlush(); err != nil {
+			fmt.Printf("cleanup failed: %s\n", err)
+		}
+	}
 }

@@ -19,17 +19,6 @@ import (
 	"github.com/google/nftables/expr"
 )
 
-type Table struct {
-	// name of the table used for firewall rules
-	name string
-	// chain within the table used as target by firewall rules
-	chain string
-	// name of the ipset set of addresses for blacklisting
-	Bl string
-	// name of the ipset set of addresses for whitelisting
-	Wl string
-}
-
 type IPTables struct {
 	// table used for firewall rules
 	table string
@@ -346,6 +335,7 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string) *NFTables {
 
 	// initialize the table used for ip address filtering
 	nft := &NFTables{
+		DryRun: false,
 		// system table used for packet filtering (e.g., 'filter')
 		Table: &nftables.Table{
 			Family: nftables.TableFamilyIPv4,
@@ -395,6 +385,7 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string) *NFTables {
 	// initialize expressions
 	// expression for jumping to the chain target
 	nft.JmpTargetExpr = []expr.Any{
+		&expr.Counter{},
 		&expr.Verdict{
 			Kind:  expr.VerdictJump,
 			Chain: target,
@@ -444,16 +435,12 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string) *NFTables {
 	nft.Rules[FwdRuleIdx] = &nftables.Rule{
 		Table: nft.Table,
 		Chain: nft.FwdChain,
-		// TODO: should be '0'
-		//Position: 1,
 		Exprs: nft.JmpTargetExpr,
 	}
 	// rule used for jumping from input chain to the target chain
 	nft.Rules[InRuleIdx] = &nftables.Rule{
 		Table: nft.Table,
 		Chain: nft.InChain,
-		// TODO: should be '0'
-		//Position: 1,
 		Exprs: nft.JmpTargetExpr,
 	}
 	// rule used for accepting packets with saddr matching wl set
@@ -481,11 +468,11 @@ func InitializeNFTables(table, fwdChain, inChain, target, bl, wl string) (*NFTab
 	}
 
 	// create the user-defined chain for the firewall.
-	log.Printf(`add chain "%s" in table "%s"`, target, nft.Table.Name)
-	if err := nft.addChainAndFlush(); err != nil {
+	if err := nft.addTgtChainAndFlush(); err != nil {
 		// TODO: rollback
 		return nil, fmt.Errorf("nftables intialization error: %w", err)
 	}
+	log.Printf(`added chain "%s" in table "%s"`, target, nft.Table.Name)
 
 	if err := nft.addRulesAndFlush(); err != nil {
 		// TODO: rollback
@@ -513,21 +500,79 @@ func addIpsToSetElements(ips []string, timeout time.Duration, elements []nftable
 	return i
 }
 
-func (nft *NFTables) getFirstRule(chain *nftables.Chain) (handle uint64, err error) {
+func areRulesEqual(lhs, rhs *nftables.Rule, cmpHandle bool) bool {
+	if cmpHandle && lhs.Handle != rhs.Handle {
+		fmt.Printf("handle\n")
+		return false
+	}
+	if len(lhs.Exprs) != len(rhs.Exprs) {
+		fmt.Printf("len\n")
+		return false
+	}
+	for i, e := range lhs.Exprs {
+		if e == nil {
+			fmt.Printf("nil\n")
+			return false
+		}
+		switch t := e.(type) {
+		case nil:
+			fmt.Printf("expr %d type mismatch\n", i)
+			return false
+		case *expr.Verdict:
+			if r, ok := rhs.Exprs[i].(*expr.Verdict); !ok {
+				fmt.Printf("expr %d type mismatch\n", i)
+				return false
+			} else {
+				if *t != *r {
+					fmt.Printf("expr %d value mismatch\n", i)
+					return false
+				}
+			}
+		case *expr.Counter:
+			if _, ok := rhs.Exprs[i].(*expr.Counter); !ok {
+				fmt.Printf("expr %d type mismatch\n", i)
+				return false
+			}
+		case *expr.Payload:
+			if r, ok := rhs.Exprs[i].(*expr.Payload); !ok {
+				fmt.Printf("expr %d type mismatch\n", i)
+				return false
+			} else {
+				if *t != *r {
+					fmt.Printf("expr %d value mismatch\n", i)
+					return false
+				}
+			}
+		case *expr.Lookup:
+			if r, ok := rhs.Exprs[i].(*expr.Lookup); !ok {
+				fmt.Printf("expr %d type mismatch\n", i)
+				return false
+			} else {
+				if *t != *r {
+					fmt.Printf("expr %d value mismatch\n", i)
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+func (nft *NFTables) getFirstRule(chain *nftables.Chain) (rule *nftables.Rule, err error) {
 	var (
 		rules []*nftables.Rule
 	)
 	if nft.DryRun {
-		return 0, nil
+		return nil, nil
 	}
 	if rules, err = nft.Conn.GetRule(nft.Table, chain); err != nil {
-		return 0, fmt.Errorf("could not get rules from table %s chain %s: %w",
+		return nil, fmt.Errorf("could not get rules from table %s chain %s: %w",
 			nft.Table.Name, chain.Name, err)
 	}
 	if len(rules) == 0 {
-		return 0, nil
+		return nil, nil
 	}
-	return rules[0].Handle, nil
+	return rules[0], nil
 }
 
 // addSetsAndFlush commits the sets into the kernel
@@ -565,7 +610,7 @@ func (nft *NFTables) delSetsAndFlush() error {
 }
 
 // addChainAndFlush commits the target chain into the kernel
-func (nft *NFTables) addChainAndFlush() error {
+func (nft *NFTables) addTgtChainAndFlush() error {
 	// add chain
 	nft.Conn.AddChain(nft.TgtChain)
 
@@ -579,8 +624,8 @@ func (nft *NFTables) addChainAndFlush() error {
 }
 
 // delChainAndFlush deletes the target chain form the kernel
-func (nft *NFTables) delChainAndFlush() error {
-	// add chain
+func (nft *NFTables) delTgtChainAndFlush() error {
+	// delete chain
 	nft.Conn.DelChain(nft.TgtChain)
 
 	if !nft.DryRun {
@@ -592,29 +637,201 @@ func (nft *NFTables) delChainAndFlush() error {
 	return nil
 }
 
-// addRulesAndFlush commits the rules into the kernel
-func (nft *NFTables) addRulesAndFlush() error {
-	var (
-		err    error
-		hf, hi uint64
-	)
-	if hf, err = nft.getFirstRule(nft.FwdChain); err != nil {
+func (nft *NFTables) delRuleAndFlush(rule *nftables.Rule) error {
+	nft.Conn.DelRule(rule)
+	if !nft.DryRun {
+		if err := nft.Conn.Flush(); err != nil {
+			// TODO: rollback
+			return fmt.Errorf(`"%s" table rule handle %d del - commit to kernel failed: %w`,
+				nft.Table.Name, rule.Handle, err)
+		}
+	}
+	return nil
+}
+
+func (nft *NFTables) delDuplicateRules(rule *nftables.Rule) error {
+	chains := [2]*nftables.Chain{
+		nft.FwdChain,
+		nft.InChain,
+	}
+	for _, chain := range chains[:] {
+		var (
+			rules []*nftables.Rule
+			err   error
+		)
+		fmt.Printf("chain.Name: %s\n", chain.Name)
+		if rules, err = nft.Conn.GetRule(nft.Table, chain); err != nil {
+			return fmt.Errorf(`failed to delete duplicate rules: cannot get rules for table %s chain %s: %w`,
+				nft.Table.Name, chain.Name, err)
+		} else if len(rules) <= 1 {
+			return nil
+		} else {
+			for _, r := range rules[1:] {
+				r.Table.Family = nft.Table.Family
+				fmt.Printf("rule.Table: %v rule.Chain: %v\n", []byte(r.Table.Name), []byte(r.Chain.Name))
+				if areRulesEqual(r, rule, false) {
+					if err := nft.delRuleAndFlush(r); err != nil {
+						log.Printf(`failed to delete duplicate rules: %s`, err)
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (nft *NFTables) addBaseChainsRulesAndFlush() error {
+	if rule, err := nft.getFirstRule(nft.FwdChain); err != nil {
 		return fmt.Errorf(`could not get first rule in "%s" table "%s" chain: %w`,
 			nft.Table.Name, nft.FwdChain.Name, err)
+	} else if rule != nil {
+		nft.Rules[FwdRuleIdx].Position = rule.Handle
 	}
-	nft.Rules[FwdRuleIdx].Handle = hf
-	if hi, err = nft.getFirstRule(nft.InChain); err != nil {
-		return fmt.Errorf(`could not get first rule in "%s" table "%s" chain: %w`,
-			nft.Table.Name, nft.InChain.Name, err)
-	}
-	nft.Rules[InRuleIdx].Handle = hi
-	for _, rule := range nft.Rules {
-		nft.Conn.AddRule(rule)
-	}
+	nft.Conn.InsertRule(nft.Rules[FwdRuleIdx])
 	if !nft.DryRun {
 		if err := nft.Conn.Flush(); err != nil {
 			// TODO: rollback
 			return fmt.Errorf(`"%s" table rule add - commit to kernel failed: %w`,
+				nft.Table.Name, err)
+		}
+	}
+	if rule, err := nft.getFirstRule(nft.InChain); err != nil {
+		return fmt.Errorf(`could not get first rule in "%s" table "%s" chain: %w`,
+			nft.Table.Name, nft.InChain.Name, err)
+	} else if rule != nil {
+		nft.Rules[InRuleIdx].Position = rule.Handle
+	}
+	nft.Conn.InsertRule(nft.Rules[InRuleIdx])
+	if !nft.DryRun {
+		if err := nft.Conn.Flush(); err != nil {
+			// TODO: rollback
+			return fmt.Errorf(`"%s" table rule add - commit to kernel failed: %w`,
+				nft.Table.Name, err)
+		}
+	}
+	if err := nft.delDuplicateRules(nft.Rules[FwdRuleIdx]); err != nil {
+		log.Printf("%s", err)
+	}
+	if !nft.DryRun {
+		// get the handles of the rules in fwd and input chains
+		if rule, err := nft.getFirstRule(nft.FwdChain); err != nil {
+			return fmt.Errorf(`could not get first rule in "%s" table "%s" chain: %w`,
+				nft.Table.Name, nft.FwdChain.Name, err)
+		} else if rule != nil {
+			nft.Rules[FwdRuleIdx].Handle = rule.Handle
+		}
+		log.Printf(`"%s" table "%s" chain rule handle: %d`,
+			nft.Table.Name, nft.FwdChain.Name, nft.Rules[FwdRuleIdx].Handle)
+		if rule, err := nft.getFirstRule(nft.InChain); err != nil {
+			return fmt.Errorf(`could not get first rule in "%s" table "%s" chain: %w`,
+				nft.Table.Name, nft.InChain.Name, err)
+		} else if rule != nil {
+			nft.Rules[InRuleIdx].Handle = rule.Handle
+		}
+		log.Printf(`"%s" table "%s" chain rule handle: %d`,
+			nft.Table.Name, nft.InChain.Name, nft.Rules[InRuleIdx].Handle)
+	}
+	return nil
+}
+
+func (nft *NFTables) addTgtChainRulesAndFlush() error {
+	var (
+		err   error
+		rules []*nftables.Rule
+	)
+	if rules, err = nft.Conn.GetRule(nft.Table, nft.TgtChain); err != nil {
+		return fmt.Errorf("could not get rules from table %s chain %s: %w",
+			nft.Table.Name, nft.TgtChain.Name, err)
+	}
+	if len(rules) != 0 {
+		// there are already rules in the chain
+		blFound, wlFound := false, false
+		for _, rule := range rules {
+			wlFound = wlFound || areRulesEqual(rule, nft.Rules[WlRuleIdx], false)
+			blFound = blFound || areRulesEqual(rule, nft.Rules[BlRuleIdx], false)
+		}
+		if !wlFound {
+			rule := nft.Rules[WlRuleIdx]
+			rule.Position = rules[0].Handle
+			fmt.Printf("inserting rule with handle %d\n", rule.Position)
+			nft.Conn.InsertRule(rule)
+			if !nft.DryRun {
+				if err := nft.Conn.Flush(); err != nil {
+					// TODO: rollback
+					return fmt.Errorf(`"%s" table rule add - commit to kernel failed: %w`,
+						nft.Table.Name, err)
+				}
+			}
+		}
+		if !blFound {
+			rule := nft.Rules[BlRuleIdx]
+			rule.Position = rules[0].Handle
+			fmt.Printf("inserting rule with handle %d\n", rule.Position)
+			nft.Conn.InsertRule(rule)
+			if !nft.DryRun {
+				if err := nft.Conn.Flush(); err != nil {
+					// TODO: rollback
+					return fmt.Errorf(`"%s" table rule add - commit to kernel failed: %w`,
+						nft.Table.Name, err)
+				}
+			}
+		}
+	} else {
+		for _, rule := range nft.Rules[WlRuleIdx : BlRuleIdx+1] {
+			nft.Conn.AddRule(rule)
+		}
+		if !nft.DryRun {
+			if err := nft.Conn.Flush(); err != nil {
+				// TODO: rollback
+				return fmt.Errorf(`"%s" table rule add - commit to kernel failed: %w`,
+					nft.Table.Name, err)
+			}
+		}
+	}
+	if !nft.DryRun {
+		// get the handles of the rules in the target chain
+		if rules, err = nft.Conn.GetRule(nft.Table, nft.TgtChain); err != nil {
+			return fmt.Errorf("could not get rules from table %s chain %s: %w",
+				nft.Table.Name, nft.TgtChain.Name, err)
+		}
+		for i, rule := range rules {
+			if i > 1 {
+				break
+			}
+			nft.Rules[WlRuleIdx+i].Handle = rule.Handle
+		}
+		log.Printf(`"%s" table "%s" chain whitelist rule handle: %d`,
+			nft.Table.Name, nft.TgtChain.Name, nft.Rules[WlRuleIdx].Handle)
+		log.Printf(`"%s" table "%s" chain blacklist rule handle: %d`,
+			nft.Table.Name, nft.TgtChain.Name, nft.Rules[BlRuleIdx].Handle)
+	}
+	return nil
+}
+
+// addRulesAndFlush commits the rules into the kernel
+func (nft *NFTables) addRulesAndFlush() error {
+	if err := nft.addBaseChainsRulesAndFlush(); err != nil {
+		return err
+	}
+	if err := nft.addTgtChainRulesAndFlush(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// delRulesAndFlush deletes the rules from the kernel
+func (nft *NFTables) delRulesAndFlush() error {
+	var (
+		err error
+	)
+	for _, rule := range nft.Rules {
+		if err = nft.Conn.DelRule(rule); err != nil {
+			return fmt.Errorf(`"%s" table rules delete failed: %w`, nft.Table.Name, err)
+		}
+	}
+	if !nft.DryRun {
+		if err := nft.Conn.Flush(); err != nil {
+			return fmt.Errorf(`"%s" table rules delete - commit to kernel failed: %w`,
 				nft.Table.Name, err)
 		}
 	}
