@@ -19,6 +19,14 @@ import (
 	"github.com/google/nftables/expr"
 )
 
+type Firewall interface {
+	// whitelisting operation
+	AddToWhitelist([]string, time.Duration) error
+
+	// blacklisting operation
+	AddToBlacklist([]string, time.Duration) error
+}
+
 type IPTables struct {
 	// table used for firewall rules
 	table string
@@ -51,6 +59,13 @@ var (
 	ErrNoBlacklistFound = errors.New("ipset blacklist was not found")
 	ErrNoWhitelistFound = errors.New("ipset whitelist was not found")
 )
+
+func GetFirewall() Firewall {
+	if GetConfig().UseNftables {
+		return nfTables
+	}
+	return ipTables
+}
 
 func checkIPSet(ipsetname string) (bool, error) {
 	type IPSet struct {
@@ -209,16 +224,30 @@ func (ipt *IPTables) InsertRuleWhitelist() (err error) {
 	return ipt.InsertIpsetRule(ipt.table, ipt.chain, ipt.Wl, true)
 }
 
-func (ipt *IPTables) AddToBlacklist(ip string, timeout int) (err error) {
+func (ipt *IPTables) AddToBlacklist(ips []string, timeout time.Duration) (err error) {
+	err = nil
 	if set, ok := ipt.Sets[ipt.Bl]; ok {
-		return set.Add(ip, timeout)
+		t := int(timeout.Seconds())
+		for _, ip := range ips {
+			if e := set.Add(ip, t); e != nil {
+				err = e
+			}
+		}
+		return err
 	}
 	return ErrNoBlacklistFound
 }
 
-func (ipt *IPTables) AddToWhitelist(ip string, timeout int) (err error) {
+func (ipt *IPTables) AddToWhitelist(ips []string, timeout time.Duration) (err error) {
+	err = nil
 	if set, ok := ipt.Sets[ipt.Wl]; ok {
-		return set.Add(ip, timeout)
+		t := int(timeout.Seconds())
+		for _, ip := range ips {
+			if e := set.Add(ip, t); e != nil {
+				err = e
+			}
+		}
+		return err
 	}
 	return ErrNoWhitelistFound
 }
@@ -331,10 +360,12 @@ type NFTables struct {
 	Conn *nftables.Conn
 }
 
+var nfTables = &NFTables{}
+
 func newNFTables(table, fwdChain, inChain, target, bl, wl string) *NFTables {
 
 	// initialize the table used for ip address filtering
-	nft := &NFTables{
+	*nfTables = NFTables{
 		DryRun: false,
 		// system table used for packet filtering (e.g., 'filter')
 		Table: &nftables.Table{
@@ -346,37 +377,37 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string) *NFTables {
 
 	// initialize chains
 	// system chain used for packet forwarding (e.g., 'FORWARD')
-	nft.FwdChain = &nftables.Chain{
-		Table:    nft.Table,
+	nfTables.FwdChain = &nftables.Chain{
+		Table:    nfTables.Table,
 		Name:     fwdChain,
 		Type:     nftables.ChainTypeFilter,
 		Hooknum:  nftables.ChainHookPrerouting,
 		Priority: nftables.ChainPriorityFilter,
 	}
 	// system chain used for packet input processing (e.g., 'INPUT')
-	nft.InChain = &nftables.Chain{
-		Table:    nft.Table,
+	nfTables.InChain = &nftables.Chain{
+		Table:    nfTables.Table,
 		Name:     inChain,
 		Type:     nftables.ChainTypeFilter,
 		Hooknum:  nftables.ChainHookPrerouting,
 		Priority: nftables.ChainPriorityFilter,
 	}
 	// chain which contains blacklist and whitelist rules; it is used as jump target
-	nft.TgtChain = &nftables.Chain{
-		Table: nft.Table,
+	nfTables.TgtChain = &nftables.Chain{
+		Table: nfTables.Table,
 		Name:  target,
 		Type:  "",
 	}
 
 	// initialize sets
-	nft.Sets[BlSet] = &nftables.Set{
-		Table:      nft.Table,
+	nfTables.Sets[BlSet] = &nftables.Set{
+		Table:      nfTables.Table,
 		Name:       bl,
 		HasTimeout: true,
 		KeyType:    nftables.TypeIPAddr,
 	}
-	nft.Sets[WlSet] = &nftables.Set{
-		Table:      nft.Table,
+	nfTables.Sets[WlSet] = &nftables.Set{
+		Table:      nfTables.Table,
 		Name:       wl,
 		HasTimeout: true,
 		KeyType:    nftables.TypeIPAddr,
@@ -384,7 +415,7 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string) *NFTables {
 
 	// initialize expressions
 	// expression for jumping to the chain target
-	nft.JmpTargetExpr = []expr.Any{
+	nfTables.JmpTargetExpr = []expr.Any{
 		&expr.Counter{},
 		&expr.Verdict{
 			Kind:  expr.VerdictJump,
@@ -392,7 +423,7 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string) *NFTables {
 		},
 	}
 	// expression for dropping the blacklisted addresses
-	nft.DropBlExpr = []expr.Any{
+	nfTables.DropBlExpr = []expr.Any{
 		&expr.Payload{
 			// payload load 4b @ network header + 12 => reg 1
 			DestRegister: 1,
@@ -402,8 +433,8 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string) *NFTables {
 		},
 		&expr.Lookup{
 			SourceRegister: 1,
-			SetName:        nft.Sets[BlSet].Name,
-			SetID:          nft.Sets[BlSet].ID,
+			SetName:        nfTables.Sets[BlSet].Name,
+			SetID:          nfTables.Sets[BlSet].ID,
 		},
 		&expr.Counter{},
 		&expr.Verdict{
@@ -411,7 +442,7 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string) *NFTables {
 		},
 	}
 	// expression for accepting the whitelisted addresses
-	nft.AcceptWlExpr = []expr.Any{
+	nfTables.AcceptWlExpr = []expr.Any{
 		&expr.Payload{
 			// payload load 4b @ network header + 12 => reg 1
 			DestRegister: 1,
@@ -421,8 +452,8 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string) *NFTables {
 		},
 		&expr.Lookup{
 			SourceRegister: 1,
-			SetName:        nft.Sets[WlSet].Name,
-			SetID:          nft.Sets[WlSet].ID,
+			SetName:        nfTables.Sets[WlSet].Name,
+			SetID:          nfTables.Sets[WlSet].ID,
 		},
 		&expr.Counter{},
 		&expr.Verdict{
@@ -432,31 +463,31 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string) *NFTables {
 
 	// initialize rules
 	// rule used for jumping from forwarding chain to the target chain
-	nft.Rules[FwdRuleIdx] = &nftables.Rule{
-		Table: nft.Table,
-		Chain: nft.FwdChain,
-		Exprs: nft.JmpTargetExpr,
+	nfTables.Rules[FwdRuleIdx] = &nftables.Rule{
+		Table: nfTables.Table,
+		Chain: nfTables.FwdChain,
+		Exprs: nfTables.JmpTargetExpr,
 	}
 	// rule used for jumping from input chain to the target chain
-	nft.Rules[InRuleIdx] = &nftables.Rule{
-		Table: nft.Table,
-		Chain: nft.InChain,
-		Exprs: nft.JmpTargetExpr,
+	nfTables.Rules[InRuleIdx] = &nftables.Rule{
+		Table: nfTables.Table,
+		Chain: nfTables.InChain,
+		Exprs: nfTables.JmpTargetExpr,
 	}
 	// rule used for accepting packets with saddr matching wl set
-	nft.Rules[WlRuleIdx] = &nftables.Rule{
-		Table: nft.Table,
-		Chain: nft.TgtChain,
-		Exprs: nft.AcceptWlExpr,
+	nfTables.Rules[WlRuleIdx] = &nftables.Rule{
+		Table: nfTables.Table,
+		Chain: nfTables.TgtChain,
+		Exprs: nfTables.AcceptWlExpr,
 	}
 	// rule used for dropping packets with saddr matching bl set
-	nft.Rules[BlRuleIdx] = &nftables.Rule{
-		Table: nft.Table,
-		Chain: nft.TgtChain,
-		Exprs: nft.DropBlExpr,
+	nfTables.Rules[BlRuleIdx] = &nftables.Rule{
+		Table: nfTables.Table,
+		Chain: nfTables.TgtChain,
+		Exprs: nfTables.DropBlExpr,
 	}
 
-	return nft
+	return nfTables
 }
 
 func InitializeNFTables(table, fwdChain, inChain, target, bl, wl string) (*NFTables, error) {
@@ -484,17 +515,25 @@ func InitializeNFTables(table, fwdChain, inChain, target, bl, wl string) (*NFTab
 
 func addIpsToSetElements(ips []string, timeout time.Duration, elements []nftables.SetElement) int {
 	var (
-		i  int
+		i  int = 0
 		ip string
+		b  net.IP
 	)
-	for i, ip = range ips {
+	for _, ip = range ips {
+		if len(ip) == 0 {
+			continue
+		}
 		if i == len(elements) {
 			break
 		}
+		if b = []byte(net.ParseIP(ip).To4()); b == nil {
+			continue
+		}
 		elements[i] = nftables.SetElement{
-			Key:     []byte(net.ParseIP(ip).To4()),
+			Key:     b,
 			Timeout: timeout,
 		}
+		i++
 	}
 
 	return i
