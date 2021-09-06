@@ -62,7 +62,39 @@ type IPObj struct {
 	IP      string `json:"ipaddr"`
 }
 
-func (ip *IPObj) Process(ttl int, api APICode) error {
+type IpVector []IPObj
+
+func (ips IpVector) Decrypt(plainTxt []string) int {
+	var (
+		i int = 0
+	)
+	for _, ip := range ips {
+		if i > len(plainTxt) {
+			break
+		}
+		if b, err := ip.Decrypt(); err != nil {
+			continue
+		} else {
+			plainTxt[i] = b
+			i++
+		}
+	}
+	return i
+}
+
+func (ips IpVector) Whitelist(ttl time.Duration) error {
+	plainTxt := make([]string, len(ips))
+	n := ips.Decrypt(plainTxt)
+	return GetFirewall().AddToWhitelist(plainTxt[0:n], ttl)
+}
+
+func (ips IpVector) Blacklist(ttl time.Duration) error {
+	plainTxt := make([]string, len(ips))
+	n := ips.Decrypt(plainTxt)
+	return GetFirewall().AddToBlacklist(plainTxt[0:n], ttl)
+}
+
+func (ip *IPObj) Process(ttl time.Duration, api APICode) error {
 	switch api {
 	case APIBanned:
 		return ip.Blacklist(ttl)
@@ -72,26 +104,26 @@ func (ip *IPObj) Process(ttl int, api APICode) error {
 	return fmt.Errorf("unknown API: %d", api)
 }
 
-func (ip *IPObj) Whitelist(ttl int) error {
+func (ip *IPObj) Whitelist(ttl time.Duration) error {
 	var (
 		err   error
 		ipStr string
 	)
 	if ipStr, err = ip.Decrypt(); err == nil {
-		if err = IpTables().AddToWhitelist(ipStr, ttl); err == nil {
+		if err = IpTables().AddToWhitelist([]string{ipStr}, ttl); err == nil {
 			log.Printf("processed IP: %s", ipStr)
 		}
 	}
 	return err
 }
 
-func (ip *IPObj) Blacklist(ttl int) error {
+func (ip *IPObj) Blacklist(ttl time.Duration) error {
 	var (
 		err   error
 		ipStr string
 	)
 	if ipStr, err = ip.Decrypt(); err == nil {
-		if err = IpTables().AddToBlacklist(ipStr, ttl); err == nil {
+		if err = IpTables().AddToBlacklist([]string{ipStr}, ttl); err == nil {
 			log.Printf("processed IP: %s", ipStr)
 		}
 	}
@@ -122,22 +154,20 @@ func (msg *IPResponse) Process(api Api) {
 		log.Print("No new bans to add...")
 	}
 
-	ttl := int(GetConfig().BlacklistTtl / time.Second) // round-down to seconds
+	ttl := GetConfig().BlacklistTtl
 	if ttl == 0 {
 		// try to get the ttl from the answers metadata
-		ttl, _ = msg.Metadata.Ttl()
+		t, _ := msg.Metadata.Ttl()
+		ttl = time.Duration(t) * time.Second
 	}
 	log.Print("ttl: ", ttl)
 	// process IP objects
 	msg.procIP(ttl, api)
 }
 
-func (msg *IPResponse) procIP(ttl int, api Api) {
-	for _, s := range msg.IPs {
-		err := api.ResponseProc(&s, ttl)
-		if err != nil {
-			log.Printf("failed to process IP: %s", err.Error())
-		}
+func (msg *IPResponse) procIP(ttl time.Duration, api Api) {
+	if err := api.ResponseProc(msg.IPs, ttl); err != nil {
+		log.Printf("failed to process IP addresses: %s", err.Error())
 	}
 }
 
@@ -147,20 +177,20 @@ type Api struct {
 	Path         string
 	Values       url.Values
 	Code         APICode
-	ResponseProc func(*IPObj, int) error
+	ResponseProc func(IpVector, time.Duration) error
 }
 
 func NewBannedApi(configId, baseUrl, token string) *Api {
 	bannedApi.init(configId, baseUrl, "bwnoa/v4list", token, APIBanned)
 	bannedApi.Values.Add("list", "ipblack")
-	bannedApi.ResponseProc = (*IPObj).Blacklist
+	bannedApi.ResponseProc = (IpVector).Blacklist
 	return &bannedApi
 }
 
 func NewAllowedApi(configId, baseUrl, token string) *Api {
 	allowedApi.init(configId, baseUrl, "bwnoa/v4list", token, APIAllowed)
 	allowedApi.Values.Add("list", "ipwhite")
-	allowedApi.ResponseProc = (*IPObj).Whitelist
+	allowedApi.ResponseProc = (IpVector).Whitelist
 	return &allowedApi
 }
 
