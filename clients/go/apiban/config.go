@@ -46,6 +46,7 @@ type Config struct {
 	EncryptionKey string `long:"ENCRYPTION_KEY" description:"encryption key as a hex string (password and key must not be set in the same time)"`
 
 	LogFilename string       `short:"l" long:"log" description:"log file or - for stdout"`
+	UseNftables bool         `short:"n" long:"nftables" description:"use nftables APIs for firewall rules"`
 	SetCfgFile  func(string) `short:"c" long:"config" description:"config file"`
 	Pdefaults   func()       `long:"defaults" description:"print default config"`
 	Pconfig     func(bool)   `long:"dump_cfg" optional:"1" optional-value:"0" description:"print current config, use true or 1 for condensed version"`
