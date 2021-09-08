@@ -54,7 +54,7 @@ func TestNftables(t *testing.T) {
 		t.Fatalf("could parse duration %s", err)
 	}
 	t.Run("initialize nftables", func(t *testing.T) {
-		nft, err = InitializeNFTables("filter", "FORWARD", "INPUT", "MONITORING", "blacklist", "whitelist")
+		nft, err = InitializeNFTables("filter", "FORWARD", "INPUT", "MONITORING", "blacklist", "whitelist", false)
 		if err != nil {
 			t.Fatalf("%s", err)
 		}

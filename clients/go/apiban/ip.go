@@ -7,6 +7,22 @@ import (
 	"time"
 )
 
+// NewBannedApi returns an initialized Api object which can be used for retrieving blacklisted IP addresses
+func NewBannedApi(configId, baseUrl, token string) *Api {
+	bannedApi.init(configId, baseUrl, "bwnoa/v4list", token, APIBanned)
+	bannedApi.Values.Add("list", "ipblack")
+	bannedApi.ResponseProc = (IpVector).Blacklist
+	return &bannedApi
+}
+
+// NewAllowedApi returns an initialized Api object which can be used for retrieving whitelisted IP addresses
+func NewAllowedApi(configId, baseUrl, token string) *Api {
+	allowedApi.init(configId, baseUrl, "bwnoa/v4list", token, APIAllowed)
+	allowedApi.Values.Add("list", "ipwhite")
+	allowedApi.ResponseProc = (IpVector).Whitelist
+	return &allowedApi
+}
+
 // IP Resource JSON objects in API responses.
 // It represents IPs of blocked/allowed IP addresses
 type IP struct {

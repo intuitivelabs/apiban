@@ -16,8 +16,8 @@ import (
 // errors
 var (
 	// encryption errors
-	ErrEncryptNoKey    = errors.New("IP encrypted but no passphrase or encryption key configured")
-	ErrEncryptWrongKey = errors.New("IP encrypted but wrong passphrase or encryption key configured")
+	ErrEncryptNoKey    = errors.New("no passphrase or encryption key configured")
+	ErrEncryptWrongKey = errors.New("validation code does not match")
 )
 
 // anonymization objects
@@ -44,7 +44,8 @@ func InitEncryption(c *Config) {
 		// generate encryption key from passphrase
 		anonymization.GenerateKeyFromPassphraseAndCopy(c.Passphrase,
 			anonymization.EncryptionKeyLen, encKey[:])
-		log.Print("encryption key: ", hex.EncodeToString(encKey[:]))
+		//debug
+		//log.Print("encryption key: ", hex.EncodeToString(encKey[:]))
 	} else if len(c.EncryptionKey) > 0 {
 		// use the configured encryption key
 		// copy the configured key into the one used during realtime processing
@@ -108,7 +109,7 @@ func DecryptIp(encrypted string, kvCode string) (decrypted string, err error) {
 	err = nil
 	decrypted = encrypted
 	if err = Validate(kvCode); err != nil {
-		err = fmt.Errorf("wrong validation code for encrypted ip address: %w", err)
+		err = fmt.Errorf("IP address decrypt error: %w", err)
 		return
 	}
 	decrypted = Ipcipher.(*anonymization.Ipcipher).DecryptStr(encrypted)

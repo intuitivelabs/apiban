@@ -55,6 +55,7 @@ const (
 
 // errors
 var (
+	ErrFirewall         = errors.New("firewall missing")
 	ErrNoIptables       = errors.New("iptables was not found")
 	ErrNoBlacklistFound = errors.New("ipset blacklist was not found")
 	ErrNoWhitelistFound = errors.New("ipset whitelist was not found")
@@ -65,6 +66,29 @@ func GetFirewall() Firewall {
 		return nfTables
 	}
 	return ipTables
+}
+
+func AddToBlacklist(ips []string, ttl time.Duration) error {
+	if fw := GetFirewall(); fw != nil {
+		return fw.AddToBlacklist(ips, ttl)
+	}
+	return ErrFirewall
+}
+
+func AddToWhitelist(ips []string, ttl time.Duration) error {
+	if fw := GetFirewall(); fw != nil {
+		return fw.AddToWhitelist(ips, ttl)
+	}
+	return ErrFirewall
+}
+
+func InitializeFirewall(bl, wl string, dryRun bool) (fw Firewall, err error) {
+	if GetConfig().UseNftables {
+		fw, err = InitializeNFTables(GetConfig().Table, GetConfig().FwdChain, GetConfig().InChain, GetConfig().TgtChain, bl, wl, dryRun)
+	} else {
+		fw, err = InitializeIPTables(GetConfig().TgtChain, bl, wl, dryRun)
+	}
+	return fw, err
 }
 
 func checkIPSet(ipsetname string) (bool, error) {
@@ -133,7 +157,7 @@ func (ipt *IPTables) AddTarget(table, chain, target string) error {
 			return fmt.Errorf(`failed to add chain "%s" as target to table:"%s" chain:"%s": %w`, target, table, chain, err)
 		}
 	} else {
-		log.Printf(`Chain "%s" is already a target in table:"%s" chain:"%s"`, target, table, chain)
+		log.Printf(`WARNING: chain "%s" already exists as a target in table:"%s" chain:"%s"`, target, table, chain)
 	}
 	return nil
 }
@@ -205,7 +229,7 @@ func (ipt *IPTables) InsertIpsetRule(table, chain, set string, accept bool) (err
 		}
 	}
 	if exists {
-		log.Printf(`rule already loaded: "-t %s -C %s -m set --match-set %s src -j %s"`, table, chain, set, target)
+		log.Printf(`WARNING: rule already exists: "-t %s -C %s -m set --match-set %s src -j %s"`, table, chain, set, target)
 		return
 	}
 	// insert rule into chain using ipset
@@ -284,9 +308,9 @@ func InitializeIPTables(chain, bl, wl string, dryRun bool) (*IPTables, error) {
 			return nil, fmt.Errorf(`"%s" table "%s" chain list error: %w`, ipTables.table, chain, err)
 		} else {
 			log.Printf(
-				`WARNING: "%s" table "%s" chain exists and has the following rules:
-"%s"`,
-				ipTables.table, chain, strings.Join(rules, "\n"))
+				`WARNING: chain "%s" already exists in table "%s" chain and has the following rules:
+%s`,
+				chain, ipTables.table, strings.Join(rules, "\n"))
 		}
 	}
 
@@ -362,11 +386,11 @@ type NFTables struct {
 
 var nfTables = &NFTables{}
 
-func newNFTables(table, fwdChain, inChain, target, bl, wl string) *NFTables {
+func newNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun bool) *NFTables {
 
 	// initialize the table used for ip address filtering
 	*nfTables = NFTables{
-		DryRun: false,
+		DryRun: dryRun,
 		// system table used for packet filtering (e.g., 'filter')
 		Table: &nftables.Table{
 			Family: nftables.TableFamilyIPv4,
@@ -490,9 +514,9 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string) *NFTables {
 	return nfTables
 }
 
-func InitializeNFTables(table, fwdChain, inChain, target, bl, wl string) (*NFTables, error) {
+func InitializeNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun bool) (*NFTables, error) {
 
-	nft := newNFTables(table, fwdChain, inChain, target, bl, wl)
+	nft := newNFTables(table, fwdChain, inChain, target, bl, wl, dryRun)
 
 	if err := nft.addSetsAndFlush(); err != nil {
 		return nil, fmt.Errorf("nftables intialization error: %w", err)
@@ -555,40 +579,40 @@ func areRulesEqual(lhs, rhs *nftables.Rule, cmpHandle bool) bool {
 		}
 		switch t := e.(type) {
 		case nil:
-			fmt.Printf("expr %d type mismatch\n", i)
+			//fmt.Printf("expr %d type mismatch\n", i)
 			return false
 		case *expr.Verdict:
 			if r, ok := rhs.Exprs[i].(*expr.Verdict); !ok {
-				fmt.Printf("expr %d type mismatch\n", i)
+				//fmt.Printf("expr %d type mismatch\n", i)
 				return false
 			} else {
 				if *t != *r {
-					fmt.Printf("expr %d value mismatch\n", i)
+					//fmt.Printf("expr %d value mismatch\n", i)
 					return false
 				}
 			}
 		case *expr.Counter:
 			if _, ok := rhs.Exprs[i].(*expr.Counter); !ok {
-				fmt.Printf("expr %d type mismatch\n", i)
+				//fmt.Printf("expr %d type mismatch\n", i)
 				return false
 			}
 		case *expr.Payload:
 			if r, ok := rhs.Exprs[i].(*expr.Payload); !ok {
-				fmt.Printf("expr %d type mismatch\n", i)
+				//fmt.Printf("expr %d type mismatch\n", i)
 				return false
 			} else {
 				if *t != *r {
-					fmt.Printf("expr %d value mismatch\n", i)
+					//fmt.Printf("expr %d value mismatch\n", i)
 					return false
 				}
 			}
 		case *expr.Lookup:
 			if r, ok := rhs.Exprs[i].(*expr.Lookup); !ok {
-				fmt.Printf("expr %d type mismatch\n", i)
+				//fmt.Printf("expr %d type mismatch\n", i)
 				return false
 			} else {
 				if *t != *r {
-					fmt.Printf("expr %d value mismatch\n", i)
+					//fmt.Printf("expr %d value mismatch\n", i)
 					return false
 				}
 			}
@@ -698,7 +722,6 @@ func (nft *NFTables) delDuplicateRules(rule *nftables.Rule) error {
 			rules []*nftables.Rule
 			err   error
 		)
-		fmt.Printf("chain.Name: %s\n", chain.Name)
 		if rules, err = nft.Conn.GetRule(nft.Table, chain); err != nil {
 			return fmt.Errorf(`failed to delete duplicate rules: cannot get rules for table %s chain %s: %w`,
 				nft.Table.Name, chain.Name, err)
@@ -707,7 +730,7 @@ func (nft *NFTables) delDuplicateRules(rule *nftables.Rule) error {
 		} else {
 			for _, r := range rules[1:] {
 				r.Table.Family = nft.Table.Family
-				fmt.Printf("rule.Table: %v rule.Chain: %v\n", []byte(r.Table.Name), []byte(r.Chain.Name))
+				//fmt.Printf("rule.Table: %v rule.Chain: %v\n", []byte(r.Table.Name), []byte(r.Chain.Name))
 				if areRulesEqual(r, rule, false) {
 					if err := nft.delRuleAndFlush(r); err != nil {
 						log.Printf(`failed to delete duplicate rules: %s`, err)

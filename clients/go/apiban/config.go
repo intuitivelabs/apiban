@@ -28,14 +28,17 @@ var (
 
 // Config is the structure for the JSON config file
 type Config struct {
-	Apikey  string        `long:"APIKEY" description:"api key"`
-	Token   string        `long:"TOKEN" description:"SSO token"`
-	Lkid    string        `long:"LKID" description:"lk id"`
-	Version string        `long:"VERSION" description:"protocol version"`
-	Url     string        `long:"URL" description:"URL of blacklisted IPs DB"`
-	Chain   string        `long:"CHAIN" description:"ipset chain name for matching entries"`
-	Tick    time.Duration `long:"INTERVAL" description:"interval for the list refresh"`
-	Full    string        `long:"FULL" description:"yes/no - starting from scratch"`
+	Apikey   string        `long:"APIKEY" description:"api key"`
+	Token    string        `long:"TOKEN" description:"SSO token"`
+	Lkid     string        `long:"LKID" description:"lk id"`
+	Version  string        `long:"VERSION" description:"protocol version"`
+	Url      string        `long:"URL" description:"URL of blacklisted IPs DB"`
+	TgtChain string        `long:"CHAIN" description:"netfilter target chain used for matching entries"`
+	Table    string        `long:"TABLE" description:"netfilter filter table"`
+	FwdChain string        `long:"FORWARD" description:"netfilter forwarding base chain"`
+	InChain  string        `long:"INPUT" description:"netfilter input base chain"`
+	Tick     time.Duration `long:"INTERVAL" description:"interval for the list refresh"`
+	Full     string        `long:"FULL" description:"yes/no - starting from scratch"`
 	// state filename
 	StateFilename string `long:"STATE_FILENAME" description:"filename for keeping the state"`
 	// ttl for the firewall DROP rules
@@ -56,10 +59,14 @@ type Config struct {
 
 var DefaultConfig = Config{
 	Url:         "https://siem.intuitivelabs.com/api/",
-	Chain:       "BLOCKER",
+	TgtChain:    "BLOCKER",
+	Table:       "filter",
+	FwdChain:    "forward",
+	InChain:     "input",
 	LogFilename: "/var/log/apiban-ipsets.log",
 	Tick:        60 * time.Second,
 	Full:        "no",
+	UseNftables: true,
 }
 
 // global configuration
@@ -191,8 +198,17 @@ func FixConfig(apiconfig *Config) error {
 	}
 
 	// use default
-	if len(apiconfig.Chain) == 0 {
-		apiconfig.Chain = "BLOCKER"
+	if len(apiconfig.Table) == 0 {
+		apiconfig.Table = DefaultConfig.Table
+	}
+	if len(apiconfig.TgtChain) == 0 {
+		apiconfig.TgtChain = DefaultConfig.TgtChain
+	}
+	if len(apiconfig.FwdChain) == 0 {
+		apiconfig.FwdChain = DefaultConfig.FwdChain
+	}
+	if len(apiconfig.InChain) == 0 {
+		apiconfig.InChain = DefaultConfig.InChain
 	}
 	return nil
 }
