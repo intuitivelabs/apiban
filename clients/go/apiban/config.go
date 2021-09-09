@@ -50,6 +50,7 @@ type Config struct {
 
 	LogFilename string       `short:"l" long:"log" description:"log file or - for stdout"`
 	UseNftables bool         `short:"n" long:"nftables" description:"use nftables APIs for firewall rules"`
+	DryRun      bool         `short:"d" long:"dryrun" description:"only show the required firewall changes"`
 	SetCfgFile  func(string) `short:"c" long:"config" description:"config file"`
 	Pdefaults   func()       `long:"defaults" description:"print default config"`
 	Pconfig     func(bool)   `long:"dump_cfg" optional:"1" optional-value:"0" description:"print current config, use true or 1 for condensed version"`
@@ -67,6 +68,7 @@ var DefaultConfig = Config{
 	Tick:        60 * time.Second,
 	Full:        "no",
 	UseNftables: true,
+	DryRun:      true,
 }
 
 // global configuration
