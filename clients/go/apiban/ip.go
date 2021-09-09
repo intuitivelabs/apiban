@@ -3,24 +3,40 @@ package apiban
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"strconv"
 	"time"
 )
 
 // NewBannedApi returns an initialized Api object which can be used for retrieving blacklisted IP addresses
-func NewBannedApi(configId, baseUrl, token string) *Api {
-	bannedApi.init(configId, baseUrl, "bwnoa/v4list", token, APIBanned)
-	bannedApi.Values.Add("list", "ipblack")
-	bannedApi.ResponseProc = (IpVector).Blacklist
-	return &bannedApi
+func NewBannedIpApi(configId, baseUrl, token string) *Api {
+	bannedIpApi := Api{
+		Values: url.Values{},
+		Client: defaultHttpClient,
+	}
+	bannedIpApi.init("IP blacklist", configId, baseUrl, BwV4List, token, IpBanned)
+	bannedIpApi.Values.Add("list", "ipblack")
+	bannedIpApi.ResponseProc = (IpVector).Blacklist
+	log.Printf("%s", bannedIpApi.String())
+	return &bannedIpApi
 }
 
 // NewAllowedApi returns an initialized Api object which can be used for retrieving whitelisted IP addresses
-func NewAllowedApi(configId, baseUrl, token string) *Api {
-	allowedApi.init(configId, baseUrl, "bwnoa/v4list", token, APIAllowed)
-	allowedApi.Values.Add("list", "ipwhite")
-	allowedApi.ResponseProc = (IpVector).Whitelist
-	return &allowedApi
+func NewAllowedIpApi(configId, baseUrl, token string) *Api {
+	allowedIpApi := Api{
+		Values: url.Values{},
+		Client: defaultHttpClient,
+	}
+	allowedIpApi.init("IP whitelist", configId, baseUrl, BwV4List, token, IpAllowed)
+	allowedIpApi.Values.Add("list", "ipwhite")
+	allowedIpApi.ResponseProc = (IpVector).Whitelist
+	log.Printf("%s", allowedIpApi.String())
+	return &allowedIpApi
+}
+
+func RegisterIpApis(configId, baseUrl, token string) {
+	Apis[IpBanned] = NewBannedIpApi(configId, baseUrl, token)
+	Apis[IpAllowed] = NewAllowedIpApi(configId, baseUrl, token)
 }
 
 // IP Resource JSON objects in API responses.
@@ -67,12 +83,12 @@ func (ip *IP) Process(ttl time.Duration, api APICode) error {
 		return ErrNoIptables
 	}
 	switch api {
-	case APIBanned:
+	case IpBanned:
 		if IpTables().Sets[IpTables().Bl] == nil {
 			return ErrNoBlacklistFound
 		}
 		return ip.Blacklist(ttl)
-	case APIAllowed:
+	case IpAllowed:
 		if IpTables().Sets[IpTables().Wl] == nil {
 			return ErrNoWhitelistFound
 		}

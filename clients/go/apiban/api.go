@@ -19,6 +19,7 @@ type Response interface {
 }
 
 type Api struct {
+	Name     string
 	Client   http.Client
 	ConfigId string
 	BaseUrl  string
@@ -32,11 +33,16 @@ type Api struct {
 }
 
 // use insecure if configured - TESTING PURPOSES ONLY!
-var transCfg = &http.Transport{
-	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-}
+var (
+	transCfg = &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+	}
 
-var httpClient = &http.Client{Transport: transCfg}
+	httpClient = &http.Client{Transport: transCfg}
+
+	// API register
+	Apis [4]*Api
+)
 
 // API response JSON objects
 var IPMapKeys = [...]string{"IP", "fromua", "encrypt", "exceeded", "count", "timestamp"}
@@ -44,12 +50,19 @@ var MetadataKeys = [...]string{"defaultBlacklistTtl"}
 
 type JSONMap map[string]interface{}
 
+// API codes
 type APICode int
 
 const (
-	APIBanned APICode = iota
-	APIAllowed
-	APIUri
+	IpBanned APICode = iota
+	IpAllowed
+	UriBanned
+	UriAllowed
+)
+
+// API paths
+const (
+	BwV4List = "bwnoa/v4list"
 )
 
 // errors
@@ -108,25 +121,14 @@ var (
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
-	bannedApi Api = Api{
-		Values: url.Values{},
-		Client: defaultHttpClient,
-	}
-	allowedApi Api = Api{
-		Values: url.Values{},
-		Client: defaultHttpClient,
-	}
-	uriApi Api = Api{
-		Values: url.Values{},
-		Client: defaultHttpClient,
-	}
 )
 
 // init the members of Api data structure
-func (api *Api) init(configId, baseUrl, path, token string, code APICode) {
+func (api *Api) init(name, configId, baseUrl, path, token string, code APICode) {
 	for k, _ := range api.Values {
 		delete(api.Values, k)
 	}
+	api.Name = name
 	api.Code = code
 	if len(configId) == 0 {
 		configId = "0"
@@ -138,6 +140,11 @@ func (api *Api) init(configId, baseUrl, path, token string, code APICode) {
 	if len(token) > 0 {
 		api.Values.Add("token", token)
 	}
+}
+
+// string conversion
+func (api *Api) String() string {
+	return `API "` + api.Name + `" URL: ` + api.Url()
 }
 
 // Request sends an API request by encoding the URL and using after that Get().
@@ -335,11 +342,14 @@ func (msg *JSONResponse) processElements(ttl time.Duration, api *Api) error {
 	)
 	plainTxt := make([]string, len(msg.Elements))
 	for _, el := range msg.Elements {
+		if el == nil {
+			continue
+		}
 		if i > len(plainTxt) {
 			break
 		}
 		if b, err := el.r.Decrypt(); err != nil {
-			fmt.Printf(`error decrypting "%v": %s\n`, el.r, err)
+			fmt.Printf("error decrypting \"%v\": %s\n", el.r, err)
 			continue
 		} else {
 			fmt.Printf("decrypted element: %s\n", b)
@@ -348,9 +358,9 @@ func (msg *JSONResponse) processElements(ttl time.Duration, api *Api) error {
 		}
 	}
 	switch api.Code {
-	case APIBanned:
+	case IpBanned:
 		return AddToBlacklist(plainTxt[0:i], ttl)
-	case APIAllowed:
+	case IpAllowed:
 		return AddToWhitelist(plainTxt[0:i], ttl)
 	default:
 		return ErrUnknownApi

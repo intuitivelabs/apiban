@@ -22,11 +22,33 @@ func (uri *URI) Decrypt() (string, error) {
 	return "", nil
 }
 
-// NewUriApi returns an initialized Api object which can be used for retrieving URIs
-func NewUriApi(configId, baseUrl, token string) *Api {
-	uriApi.init(configId, baseUrl, "bwnoa/v4list", token, APIUri)
-	uriApi.Values.Add("list", "uri")
-	return &uriApi
+// NewBannedUriApi returns an initialized Api object which can be used for retrieving banned (blacklisted) URIs
+func NewBannedUriApi(configId, baseUrl, token string) *Api {
+	bannedUriApi := Api{
+		Values: url.Values{},
+		Client: defaultHttpClient,
+	}
+	bannedUriApi.init("SIP URI blacklist", configId, baseUrl, BwV4List, token, UriBanned)
+	bannedUriApi.Values.Add("list", "uriblack")
+	log.Printf("%s", bannedUriApi.String())
+	return &bannedUriApi
+}
+
+// NewAllowedUriApi returns an initialized Api object which can be used for retrieving explicitly allowed (whitelisted) URIs
+func NewAllowedUriApi(configId, baseUrl, token string) *Api {
+	allowedUriApi := Api{
+		Values: url.Values{},
+		Client: defaultHttpClient,
+	}
+	allowedUriApi.init("SIP URI whitelist", configId, baseUrl, BwV4List, token, UriAllowed)
+	allowedUriApi.Values.Add("list", "uriwhite")
+	log.Printf("%s", allowedUriApi.String())
+	return &allowedUriApi
+}
+
+func RegisterUriApis(configId, baseUrl, token string) {
+	Apis[UriBanned] = NewBannedUriApi(configId, baseUrl, token)
+	Apis[UriAllowed] = NewAllowedUriApi(configId, baseUrl, token)
 }
 
 // ApiBannedURIReq sends an HTTP request using an URL built like this from the input parameters:

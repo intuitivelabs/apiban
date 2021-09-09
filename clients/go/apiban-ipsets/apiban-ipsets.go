@@ -166,9 +166,8 @@ func main() {
 	//	fmt.Print("Error", err)
 	//}
 	//fmt.Print("Content", content)
-	apis[0] = apiban.NewBannedApi(apiconfig.Lkid, apiconfig.Url, apiconfig.Token)
-	apis[1] = apiban.NewAllowedApi(apiconfig.Lkid, apiconfig.Url, apiconfig.Token)
-	apis[2] = apiban.NewUriApi(apiconfig.Lkid, apiconfig.Url, apiconfig.Token)
+	apiban.RegisterIpApis(apiconfig.Lkid, apiconfig.Url, apiconfig.Token)
+	apiban.RegisterUriApis(apiconfig.Lkid, apiconfig.Url, apiconfig.Token)
 
 	fmt.Println("going to run in a looop")
 	if err := run(ctx, *apiconfig, apis[:], sigChan); err != nil {
@@ -203,10 +202,10 @@ func run(ctx context.Context, apiconfig apiban.Config, apis []*apiban.Api, sigCh
 			cnt++
 			// change the timeout to the one in the configuration
 			fmt.Println("ticker:", t)
-			for _, api := range apis {
+			for _, api := range apiban.Apis {
 				err = api.Process()
 				if err != nil {
-					log.Printf(`failed to process API "%s": %s`, api.Url, err)
+					log.Printf(`failed to process API "%s": %s`, api.Name, err)
 				}
 			}
 		}
