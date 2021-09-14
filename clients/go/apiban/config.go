@@ -68,7 +68,7 @@ var DefaultConfig = Config{
 	Tick:        60 * time.Second,
 	Full:        "no",
 	UseNftables: true,
-	DryRun:      true,
+	DryRun:      false,
 }
 
 // global configuration
