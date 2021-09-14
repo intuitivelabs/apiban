@@ -87,8 +87,7 @@ func installSignalHandler() chan os.Signal {
 
 func main() {
 	var (
-		err  error
-		apis [3]*apiban.Api
+		err error
 	)
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
@@ -143,10 +142,15 @@ func main() {
 	apiban.InitEncryption(apiconfig)
 
 	fmt.Println("Initializing firewall...")
-	_, err = apiban.InitializeFirewall("blacklist", "whitelist", false)
+	fw, err := apiban.InitializeFirewall("blacklist", "whitelist", apiconfig.DryRun)
 
 	if err != nil {
 		log.Fatalln("failed to initialize firewall: ", err)
+	}
+
+	if apiconfig.DryRun {
+		log.Printf("firewall commands:\n%s", fw.GetCommands())
+		return
 	}
 
 	//if iptinit == "chain created" {
@@ -170,13 +174,13 @@ func main() {
 	apiban.RegisterUriApis(apiconfig.Lkid, apiconfig.Url, apiconfig.Token)
 
 	fmt.Println("going to run in a looop")
-	if err := run(ctx, *apiconfig, apis[:], sigChan); err != nil {
+	if err := run(ctx, *apiconfig, sigChan); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 	}
 	wg.Wait()
 }
 
-func run(ctx context.Context, apiconfig apiban.Config, apis []*apiban.Api, sigChan chan os.Signal) error {
+func run(ctx context.Context, apiconfig apiban.Config, sigChan chan os.Signal) error {
 	var err error
 	var cnt int
 	// use the last timestamp saved in the state file (if non zero)
