@@ -77,14 +77,14 @@ func TestNftables(t *testing.T) {
 			if rule, err := nft.getFirstRule(nft.FwdChain); err != nil {
 				t.Fatalf(`get rules failure %s`, err)
 			} else {
-				if !areRulesEqual(rule, nft.Rules[FwdRuleIdx], true) {
+				if !areRulesEql(rule, nft.Rules[FwdRuleIdx], true) {
 					t.Fatalf(`rules mismatch in chain %s`, nft.FwdChain.Name)
 				}
 			}
 			if rule, err := nft.getFirstRule(nft.InChain); err != nil {
 				t.Fatalf(`get rules failure %s`, err)
 			} else {
-				if !areRulesEqual(rule, nft.Rules[InRuleIdx], true) {
+				if !areRulesEql(rule, nft.Rules[InRuleIdx], true) {
 					t.Fatalf(`rules mismatch in chain %s`, nft.InChain.Name)
 				}
 			}
@@ -98,7 +98,7 @@ func TestNftables(t *testing.T) {
 					if i > 1 {
 						break
 					}
-					if !areRulesEqual(rule, nft.Rules[i+WlRuleIdx], true) {
+					if !areRulesEql(rule, nft.Rules[i+WlRuleIdx], true) {
 						t.Fatalf(`mismatching rules for table %s chain %s`, nft.Table.Name, chain.Name)
 					}
 				}
@@ -125,7 +125,7 @@ func TestNftables(t *testing.T) {
 		if err = nft.delRulesAndFlush(); err != nil {
 			fmt.Printf("cleanup failed: %s\n", err)
 		}
-		if err = nft.delTgtChainAndFlush(); err != nil {
+		if err = nft.delRegChainAndFlush(); err != nil {
 			fmt.Printf("cleanup failed: %s\n", err)
 		}
 		if err = nft.delSetsAndFlush(); err != nil {
