@@ -393,7 +393,8 @@ func areRulesEql(lhs, rhs *nftables.Rule, cmpHandle bool) bool {
 		return false
 	}
 	if len(lhs.Exprs) != len(rhs.Exprs) {
-		fmt.Printf("len\n")
+		//TODO debug
+		//fmt.Printf("len\n")
 		return false
 	}
 	for i, e := range lhs.Exprs {

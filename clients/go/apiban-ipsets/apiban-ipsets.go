@@ -141,7 +141,8 @@ func main() {
 
 	apiban.InitEncryption(apiconfig)
 
-	fmt.Println("Initializing firewall...")
+	//TODO debug
+	//fmt.Println("Initializing firewall...")
 	fw, err := apiban.InitializeFirewall("blacklist", "whitelist", apiconfig.DryRun)
 
 	if err != nil {
