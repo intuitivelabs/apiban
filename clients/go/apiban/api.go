@@ -29,7 +29,7 @@ type Api struct {
 	// query parameters are stored here
 	Values       url.Values
 	Code         APICode
-	ResponseProc func(IpVector, time.Duration) error
+	ResponseProc func(IpVector, time.Duration) (int, error)
 }
 
 // use insecure if configured - TESTING PURPOSES ONLY!
@@ -333,13 +333,20 @@ func (msg *JSONResponse) Process(api *Api) error {
 	}
 
 	// process IP objects
-	return msg.processElements(ttl, api)
+	cnt, err := msg.processElements(ttl, api)
+	if cnt < len(msg.Elements) {
+		log.Printf("processed %d out of %d elements", cnt, len(msg.Elements))
+	}
+	return err
 }
 
-func (msg *JSONResponse) processElements(ttl time.Duration, api *Api) error {
+func (msg *JSONResponse) processElements(ttl time.Duration, api *Api) (int, error) {
 	var (
 		i int = 0
 	)
+	if len(msg.Elements) == 0 {
+		return 0, nil
+	}
 	plainTxt := make([]string, len(msg.Elements))
 	for _, el := range msg.Elements {
 		if el == nil {
@@ -357,13 +364,19 @@ func (msg *JSONResponse) processElements(ttl time.Duration, api *Api) error {
 			i++
 		}
 	}
+	if i < len(plainTxt) {
+		log.Printf("%d out of %d elements were decrypted", i, len(plainTxt))
+	}
+	if i == 0 {
+		return 0, nil
+	}
 	switch api.Code {
 	case IpBanned:
 		return AddToBlacklist(plainTxt[0:i], ttl)
 	case IpAllowed:
 		return AddToWhitelist(plainTxt[0:i], ttl)
 	default:
-		return ErrUnknownApi
+		return 0, ErrUnknownApi
 	}
 }
 
