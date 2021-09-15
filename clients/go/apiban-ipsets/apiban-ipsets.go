@@ -143,14 +143,11 @@ func main() {
 
 	//TODO debug
 	//fmt.Println("Initializing firewall...")
-	fw, err := apiban.InitializeFirewall("blacklist", "whitelist", apiconfig.DryRun)
-
-	if err != nil {
+	if _, err := apiban.InitializeFirewall("blacklist", "whitelist", apiconfig.DryRun); err != nil {
 		log.Fatalln("failed to initialize firewall: ", err)
 	}
 
 	if apiconfig.DryRun {
-		log.Printf("firewall commands:\n%s", fw.GetCommands())
 		return
 	}
 
