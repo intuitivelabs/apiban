@@ -14,12 +14,14 @@ import (
 var (
 	ErrNftablesInit     = "nftables intialization error: %w"
 	ErrAddBaseChainRule = "failed to add base chain rule: %w"
-	ErrAddSetElements   = `adding elements to set "%s" failed: %w`
+	ErrAddSetElements   = `adding elements to set "%s" failed: %s`
 )
 
 // define a new type and implement a method which is used for adding IP addresses into a SetElement
 type SetElements []nftables.SetElement
 
+//addIps parses IP address from the input string slice and inserts them into the elements
+//It returns the number of IP addresses inserted into the elements
 func (elements SetElements) addIps(ips []string, timeout time.Duration) int {
 	var (
 		i  int = 0
@@ -189,7 +191,7 @@ func setToString(s nftables.Set) string {
 }
 
 func addSetToString(s nftables.Set) string {
-	return fmt.Sprintf("nft add set %s\n", setToString(s))
+	return fmt.Sprintf("nft add set %s", setToString(s))
 }
 
 func ruleToString(r *nftables.Rule, withStmt bool) string {
@@ -197,7 +199,7 @@ func ruleToString(r *nftables.Rule, withStmt bool) string {
 	if withStmt {
 		stmt = fmt.Sprintf(" %s ", exprToString(r.Exprs))
 	}
-	return fmt.Sprintf("rule %s %s handle %d%s\n",
+	return fmt.Sprintf("rule %s %s handle %d%s",
 		r.Table.Name,
 		r.Chain.Name,
 		r.Position,
@@ -224,11 +226,11 @@ func chainToString(c *nftables.Chain) string {
 	if c.Table == nil {
 		return "INVALID CHAIN"
 	}
-	return fmt.Sprintf("chain %s %s\n", c.Table.Name, c.Name)
+	return fmt.Sprintf("chain %s %s", c.Table.Name, c.Name)
 }
 
 func addChainToString(c *nftables.Chain) string {
-	return fmt.Sprintf("nft add %s\n", chainToString(c))
+	return fmt.Sprintf("nft add %s", chainToString(c))
 }
 
 //newNFTables initializes an NFTables structure for firewall use.
@@ -580,7 +582,7 @@ func (nft *NFTables) delRegChainAndFlush() error {
 
 func (nft *NFTables) delRuleAndFlush(rule *nftables.Rule) error {
 	nft.Conn.DelRule(rule)
-	nft.Commands = fmt.Sprintf("%s%s", nft.Commands, deleteRuleToString(rule))
+	nft.Commands = fmt.Sprintf("%s%s\n", nft.Commands, deleteRuleToString(rule))
 	if !nft.DryRun {
 		if err := nft.Conn.Flush(); err != nil {
 			// TODO: rollback
@@ -630,7 +632,7 @@ func (nft *NFTables) pushRuleAndFlush(r *nftables.Rule) error {
 		r.Position = rule.Handle
 	}
 	nft.Conn.InsertRule(r)
-	nft.Commands = fmt.Sprintf("%s%s", nft.Commands, insertRuleToString(r))
+	nft.Commands = fmt.Sprintf("%s%s\n", nft.Commands, insertRuleToString(r))
 	if !nft.DryRun {
 		if err := nft.Conn.Flush(); err != nil {
 			// TODO: rollback
@@ -719,7 +721,7 @@ func (nft *NFTables) addRegChainRulesAndFlush() error {
 	} else {
 		for _, rule := range nft.Rules[WlRuleIdx : BlRuleIdx+1] {
 			nft.Conn.AddRule(rule)
-			nft.Commands = fmt.Sprintf("%s%s", nft.Commands, addRuleToString(rule))
+			nft.Commands = fmt.Sprintf("%s%s\n", nft.Commands, addRuleToString(rule))
 		}
 		if !nft.DryRun {
 			if err := nft.Conn.Flush(); err != nil {
@@ -790,26 +792,27 @@ func (nft *NFTables) getSet(idx SetIdx) *nftables.Set {
 	}
 }
 
-func (nft *NFTables) setAddElements(idx SetIdx, elements []nftables.SetElement) (err error) {
+func (nft *NFTables) setAddElements(set *nftables.Set, elements []nftables.SetElement) (cnt int) {
 	var i int
 	for i = 0; i < len(elements)/MaxSetSize; i++ {
-		if err = nft.setAddElementsAndFlush(idx, elements[i*MaxSetSize:(i+1)*MaxSetSize]); err != nil {
-			return fmt.Errorf(ErrAddSetElements, nft.getSet(idx).Name, err)
+		if err := nft.setAddElementsAndFlush(set, elements[i*MaxSetSize:(i+1)*MaxSetSize]); err != nil {
+			log.Printf(ErrAddSetElements, set.Name, err)
+		} else {
+			cnt += MaxSetSize
 		}
+
 	}
 	if len(elements) > i*MaxSetSize {
-		if err = nft.setAddElementsAndFlush(idx, elements[i*MaxSetSize:len(elements)]); err != nil {
-			return fmt.Errorf(ErrAddSetElements, nft.getSet(idx).Name, err)
+		if err := nft.setAddElementsAndFlush(set, elements[i*MaxSetSize:len(elements)]); err != nil {
+			log.Printf(ErrAddSetElements, set.Name, err)
+		} else {
+			cnt += len(elements) - i*MaxSetSize
 		}
 	}
-	return nil
+	return
 }
 
-func (nft *NFTables) setAddElementsAndFlush(idx SetIdx, elements []nftables.SetElement) (err error) {
-	set := nft.getSet(idx)
-	if set == nil {
-		return fmt.Errorf(`bad set index %d`, idx)
-	}
+func (nft *NFTables) setAddElementsAndFlush(set *nftables.Set, elements []nftables.SetElement) (err error) {
 	nft.Conn.SetAddElements(set, elements)
 	if !nft.DryRun {
 		if err = nft.Conn.Flush(); err != nil {
@@ -819,34 +822,36 @@ func (nft *NFTables) setAddElementsAndFlush(idx SetIdx, elements []nftables.SetE
 	return nil
 }
 
-func (nft *NFTables) addIpsToSet(idx SetIdx, ips []string, timeout time.Duration) error {
+func (nft *NFTables) addIpsToSet(idx SetIdx, ips []string, timeout time.Duration) (cnt int, err error) {
 	var elements [2 * MaxSetSize]nftables.SetElement
+	cnt = 0
+	err = nil
 	sElements := SetElements(elements[:])
 	set := nft.getSet(idx)
 	if set == nil {
-		return fmt.Errorf(`bad set index %d`, idx)
+		return 0, fmt.Errorf(`unknown set (index %d)`, idx)
 	}
 	l, i := 0, 0
 	for i = 0; i < len(ips); i += l {
 		l = sElements.addIps(ips[i:], timeout)
+		fmt.Printf("l: %d\n", l)
 		if l == 0 {
 			break
 		}
-		if err := nft.setAddElements(idx, elements[0:l]); err != nil {
-			return fmt.Errorf(`%w`, err)
-		}
+		cnt += nft.setAddElements(set, elements[0:l])
+		fmt.Printf("cnt: %d\n", cnt)
 		if l >= len(ips[i:]) {
 			break
 		}
 	}
-	return nil
+	return
 }
 
-func (nft *NFTables) AddToWhitelist(ips []string, timeout time.Duration) error {
+func (nft *NFTables) AddToWhitelist(ips []string, timeout time.Duration) (int, error) {
 	return nft.addIpsToSet(WlSet, ips, timeout)
 }
 
-func (nft *NFTables) AddToBlacklist(ips []string, timeout time.Duration) error {
+func (nft *NFTables) AddToBlacklist(ips []string, timeout time.Duration) (int, error) {
 	return nft.addIpsToSet(BlSet, ips, timeout)
 }
 

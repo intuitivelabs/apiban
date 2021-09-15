@@ -262,30 +262,34 @@ func (ipt *IPTables) GetCommands() string {
 	return ipt.Commands
 }
 
-func (ipt *IPTables) AddToBlacklist(ips []string, timeout time.Duration) (err error) {
-	err = nil
+func (ipt *IPTables) AddToBlacklist(ips []string, timeout time.Duration) (cnt int, err error) {
+	err = ErrNoBlacklistFound
+	cnt = 0
 	if set, ok := ipt.Sets[ipt.Bl]; ok {
+		err = nil
 		t := int(timeout.Seconds())
 		for _, ip := range ips {
-			if e := set.Add(ip, t); e != nil {
-				err = e
+			if e := set.Add(ip, t); e == nil {
+				cnt++
 			}
 		}
-		return err
+		return
 	}
-	return ErrNoBlacklistFound
+	return 0, ErrNoBlacklistFound
 }
 
-func (ipt *IPTables) AddToWhitelist(ips []string, timeout time.Duration) (err error) {
-	err = nil
+func (ipt *IPTables) AddToWhitelist(ips []string, timeout time.Duration) (cnt int, err error) {
+	err = ErrNoWhitelistFound
+	cnt = 0
 	if set, ok := ipt.Sets[ipt.Wl]; ok {
+		err = nil
 		t := int(timeout.Seconds())
 		for _, ip := range ips {
-			if e := set.Add(ip, t); e != nil {
-				err = e
+			if e := set.Add(ip, t); e == nil {
+				cnt++
 			}
 		}
-		return err
+		return
 	}
-	return ErrNoWhitelistFound
+	return
 }

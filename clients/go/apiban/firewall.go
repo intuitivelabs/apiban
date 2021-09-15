@@ -2,6 +2,7 @@ package apiban
 
 import (
 	"errors"
+	"log"
 	"time"
 )
 
@@ -10,10 +11,10 @@ type Firewall interface {
 	GetCommands() string
 
 	// whitelisting operation
-	AddToWhitelist([]string, time.Duration) error
+	AddToWhitelist([]string, time.Duration) (int, error)
 
 	// blacklisting operation
-	AddToBlacklist([]string, time.Duration) error
+	AddToBlacklist([]string, time.Duration) (int, error)
 }
 
 const (
@@ -35,18 +36,18 @@ func GetFirewall() Firewall {
 	return ipTables
 }
 
-func AddToBlacklist(ips []string, ttl time.Duration) error {
+func AddToBlacklist(ips []string, ttl time.Duration) (int, error) {
 	if fw := GetFirewall(); fw != nil {
 		return fw.AddToBlacklist(ips, ttl)
 	}
-	return ErrFirewall
+	return 0, ErrFirewall
 }
 
-func AddToWhitelist(ips []string, ttl time.Duration) error {
+func AddToWhitelist(ips []string, ttl time.Duration) (int, error) {
 	if fw := GetFirewall(); fw != nil {
 		return fw.AddToWhitelist(ips, ttl)
 	}
-	return ErrFirewall
+	return 0, ErrFirewall
 }
 
 func InitializeFirewall(bl, wl string, dryRun bool) (fw Firewall, err error) {
@@ -54,6 +55,9 @@ func InitializeFirewall(bl, wl string, dryRun bool) (fw Firewall, err error) {
 		fw, err = InitializeNFTables(GetConfig().Table, GetConfig().FwdChain, GetConfig().InChain, GetConfig().TgtChain, bl, wl, dryRun)
 	} else {
 		fw, err = InitializeIPTables(GetConfig().TgtChain, bl, wl, dryRun)
+	}
+	if dryRun {
+		log.Printf("firewall commands:\n%s", fw.GetCommands())
 	}
 	return fw, err
 }
