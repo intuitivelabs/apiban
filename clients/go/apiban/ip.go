@@ -66,13 +66,13 @@ func (ips IpVector) Decrypt(plainTxt []string) int {
 	return i
 }
 
-func (ips IpVector) Whitelist(ttl time.Duration) error {
+func (ips IpVector) Whitelist(ttl time.Duration) (int, error) {
 	plainTxt := make([]string, len(ips))
 	n := ips.Decrypt(plainTxt)
 	return GetFirewall().AddToWhitelist(plainTxt[0:n], ttl)
 }
 
-func (ips IpVector) Blacklist(ttl time.Duration) error {
+func (ips IpVector) Blacklist(ttl time.Duration) (int, error) {
 	plainTxt := make([]string, len(ips))
 	n := ips.Decrypt(plainTxt)
 	return GetFirewall().AddToBlacklist(plainTxt[0:n], ttl)
@@ -103,7 +103,7 @@ func (ip *IP) Whitelist(ttl time.Duration) error {
 		ipStr string
 	)
 	if ipStr, err = ip.Decrypt(); err == nil {
-		if err = IpTables().AddToWhitelist([]string{ipStr}, ttl); err == nil {
+		if _, err = IpTables().AddToWhitelist([]string{ipStr}, ttl); err == nil {
 			log.Printf("processed IP: %s", ipStr)
 		}
 	}
@@ -116,7 +116,7 @@ func (ip *IP) Blacklist(ttl time.Duration) error {
 		ipStr string
 	)
 	if ipStr, err = ip.Decrypt(); err == nil {
-		if err = IpTables().AddToBlacklist([]string{ipStr}, ttl); err == nil {
+		if _, err = IpTables().AddToBlacklist([]string{ipStr}, ttl); err == nil {
 			log.Printf("processed IP: %s", ipStr)
 		}
 	}
@@ -167,7 +167,7 @@ func (msg *IPResponse) Process(api *Api) error {
 }
 
 func (msg *IPResponse) procIP(ttl time.Duration, api *Api) {
-	if err := api.ResponseProc(msg.IPs, ttl); err != nil {
+	if _, err := api.ResponseProc(msg.IPs, ttl); err != nil {
 		log.Printf("failed to process IP addresses: %s", err.Error())
 	}
 }
