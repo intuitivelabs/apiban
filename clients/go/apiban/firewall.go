@@ -50,9 +50,9 @@ func AddToWhitelist(ips []string, ttl time.Duration) (int, error) {
 	return 0, ErrFirewall
 }
 
-func InitializeFirewall(bl, wl string, dryRun bool) (fw Firewall, err error) {
+func InitializeFirewall(bl, wl string, dryRun, addBaseObj bool) (fw Firewall, err error) {
 	if GetConfig().UseNftables {
-		fw, err = InitializeNFTables(GetConfig().Table, GetConfig().FwdChain, GetConfig().InChain, GetConfig().TgtChain, bl, wl, dryRun)
+		fw, err = InitializeNFTables(GetConfig().Table, GetConfig().FwdChain, GetConfig().InChain, GetConfig().TgtChain, bl, wl, dryRun, addBaseObj)
 	} else {
 		fw, err = InitializeIPTables(GetConfig().TgtChain, bl, wl, dryRun)
 	}

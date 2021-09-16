@@ -1,6 +1,7 @@
 package apiban
 
 import (
+	"errors"
 	"fmt"
 	"github.com/google/nftables"
 	"log"
@@ -12,9 +13,10 @@ import (
 
 // nftables specific errors
 var (
-	ErrNftablesInit     = "nftables intialization error: %w"
-	ErrAddBaseChainRule = "failed to add base chain rule: %w"
-	ErrAddSetElements   = `adding elements to set "%s" failed: %s`
+	ErrNftablesAddBaseObj = errors.New("nftables intialization error: adding base objects is not allowed")
+	ErrNftablesInit       = "nftables intialization error: %w"
+	ErrAddBaseChainRule   = "failed to add base chain rule: %w"
+	ErrAddSetElements     = `adding elements to set "%s" failed: %s`
 )
 
 // define a new type and implement a method which is used for adding IP addresses into a SetElement
@@ -71,6 +73,10 @@ type NFTables struct {
 
 	// is it dry run? (no commits to the kernel)
 	DryRun bool
+
+	// is it allowed to add base objects to nftables?
+	AddBaseObj bool
+
 	// filtering table
 	Table *nftables.Table
 
@@ -226,19 +232,57 @@ func chainToString(c *nftables.Chain) string {
 	if c.Table == nil {
 		return "INVALID CHAIN"
 	}
-	return fmt.Sprintf("chain %s %s", c.Table.Name, c.Name)
+	//regular chain
+	if c.Type == "" {
+		return fmt.Sprintf("chain %s %s", c.Table.Name, c.Name)
+	}
+	hook := "hook "
+	switch c.Hooknum {
+	case nftables.ChainHookPrerouting:
+		hook += "prerouting "
+	case nftables.ChainHookInput:
+		hook += "input "
+	case nftables.ChainHookForward:
+		hook += "forward "
+	case nftables.ChainHookOutput:
+		hook += "output "
+	case nftables.ChainHookPostrouting:
+		hook += "postrouting "
+	default:
+		hook += "INVALID "
+	}
+	policy := ""
+	if c.Policy != nil {
+		policy = "policy "
+		if *c.Policy == nftables.ChainPolicyDrop {
+			policy += "drop ; "
+		} else {
+			policy += "accept ; "
+		}
+	}
+	return fmt.Sprintf("chain %s %s { type %s %spriority %d ; %s}",
+		c.Table.Name, c.Name, c.Type, hook, c.Priority, policy)
 }
 
 func addChainToString(c *nftables.Chain) string {
 	return fmt.Sprintf("nft add %s", chainToString(c))
 }
 
-//newNFTables initializes an NFTables structure for firewall use.
-func newNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun bool) *NFTables {
+func addTableToString(t *nftables.Table) string {
+	return fmt.Sprintf("nft add %s", t.Name)
+}
 
+//newNFTables initializes an NFTables structure for firewall use.
+func newNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun, addBaseObj bool) *NFTables {
+
+	var (
+		policyDrop   = nftables.ChainPolicyDrop
+		policyAccept = nftables.ChainPolicyAccept
+	)
 	// initialize the table used for ip address filtering
 	*nfTables = NFTables{
-		DryRun: dryRun,
+		DryRun:     dryRun,
+		AddBaseObj: addBaseObj,
 		// system table used for packet filtering (e.g., 'filter')
 		Table: &nftables.Table{
 			Family: nftables.TableFamilyIPv4,
@@ -253,16 +297,18 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun bool) *
 		Table:    nfTables.Table,
 		Name:     fwdChain,
 		Type:     nftables.ChainTypeFilter,
-		Hooknum:  nftables.ChainHookPrerouting,
+		Hooknum:  nftables.ChainHookForward,
 		Priority: nftables.ChainPriorityFilter,
+		Policy:   &policyDrop,
 	}
 	// system chain used for packet input processing (e.g., 'INPUT')
 	nfTables.InChain = &nftables.Chain{
 		Table:    nfTables.Table,
 		Name:     inChain,
 		Type:     nftables.ChainTypeFilter,
-		Hooknum:  nftables.ChainHookPrerouting,
+		Hooknum:  nftables.ChainHookInput,
 		Priority: nftables.ChainPriorityFilter,
+		Policy:   &policyAccept,
 	}
 	// chain which contains blacklist and whitelist rules; it is used as jump target
 	nfTables.RegChain = &nftables.Chain{
@@ -364,10 +410,18 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun bool) *
 
 //InitializeNFTables sets up the necesarry rules, chains and sets for firewall usage.
 //When `dryRun` is true this function only logs the necessary `nft` commands for setting up the rules, chains and sets.
-func InitializeNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun bool) (*NFTables, error) {
+func InitializeNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun, addBaseObj bool) (*NFTables, error) {
 
-	nft := newNFTables(table, fwdChain, inChain, target, bl, wl, dryRun)
+	nft := newNFTables(table, fwdChain, inChain, target, bl, wl, dryRun, addBaseObj)
 
+	if addBaseObj {
+		if err := nft.addTableAndFlush(); err != nil {
+			return nil, err
+		}
+		if err := nft.addBaseChainsAndFlush(); err != nil {
+			return nil, err
+		}
+	}
 	if err := nft.addSetsAndFlush(); err != nil {
 		return nil, fmt.Errorf(ErrNftablesInit, err)
 	}
@@ -391,7 +445,6 @@ func areRulesEql(lhs, rhs *nftables.Rule, cmpHandle bool) bool {
 		return lhs == rhs
 	}
 	if cmpHandle && lhs.Handle != rhs.Handle {
-		fmt.Printf("handle\n")
 		return false
 	}
 	if len(lhs.Exprs) != len(rhs.Exprs) {
@@ -401,7 +454,6 @@ func areRulesEql(lhs, rhs *nftables.Rule, cmpHandle bool) bool {
 	}
 	for i, e := range lhs.Exprs {
 		if e == nil {
-			fmt.Printf("nil\n")
 			return false
 		}
 		switch t := e.(type) {
@@ -449,7 +501,26 @@ func areRulesEql(lhs, rhs *nftables.Rule, cmpHandle bool) bool {
 }
 
 func areChainsEql(lhs, rhs *nftables.Chain) bool {
-	return lhs.Table.Name == rhs.Table.Name && lhs.Name == rhs.Name
+
+	if lhs.Type == "" && rhs.Type == "" {
+		return lhs.Table.Name == rhs.Table.Name &&
+			lhs.Name == rhs.Name
+	}
+	return lhs.Table.Name == rhs.Table.Name &&
+		lhs.Name == rhs.Name &&
+		lhs.Hooknum == rhs.Hooknum &&
+		lhs.Priority == rhs.Priority &&
+		lhs.Type == rhs.Type &&
+		lhs.Policy != nil && rhs.Policy != nil &&
+		((*lhs.Policy == 0 && *rhs.Policy == 0) ||
+			(*lhs.Policy != 0 && *rhs.Policy != 0))
+
+}
+
+func areTablesEql(lhs, rhs *nftables.Table) bool {
+	return lhs.Name == rhs.Name &&
+		lhs.Flags == rhs.Flags &&
+		lhs.Family == rhs.Family
 }
 
 func (nft *NFTables) findEqlRules(rule *nftables.Rule) (eqlRules []*nftables.Rule, err error) {
@@ -476,6 +547,22 @@ func (nft *NFTables) isChainConfigured(chain *nftables.Chain) (ok bool, err erro
 	} else {
 		for _, c := range chains {
 			if areChainsEql(c, chain) {
+				ok = true
+				break
+			}
+		}
+	}
+	return
+}
+
+func (nft *NFTables) isTableConfigured(table *nftables.Table) (ok bool, err error) {
+	ok = false
+	err = nil
+	if tables, e := nft.Conn.ListTables(); e != nil {
+		err = fmt.Errorf(`could not list tables: %w`, e)
+	} else {
+		for _, t := range tables {
+			if areTablesEql(t, table) {
 				ok = true
 				break
 			}
@@ -544,26 +631,61 @@ func (nft *NFTables) delSetsAndFlush() error {
 	return nil
 }
 
-// addChainAndFlush commits the target chain into the kernel
-func (nft *NFTables) addRegChainAndFlush() error {
+func (nft *NFTables) addChainAndFlush(chain *nftables.Chain) error {
 	// check if chain is already configured in the kernel
-	if ok, err := nft.isChainConfigured(nft.RegChain); err != nil {
-		return fmt.Errorf(`adding regular chain "%s" failed: %w`, nft.RegChain.Name, err)
+	if ok, err := nft.isChainConfigured(chain); err != nil {
+		return fmt.Errorf(`adding chain "%s" to table "%s" failed: %w`, chain.Name, chain.Table.Name, err)
 	} else if ok {
 		return nil
 	}
 	// add chain
-	nft.Conn.AddChain(nft.RegChain)
-	nft.Commands = fmt.Sprintf("%s%s\n", nft.Commands, addChainToString(nft.RegChain))
+	nft.Conn.AddChain(chain)
+	nft.Commands = fmt.Sprintf("%s%s\n", nft.Commands, addChainToString(chain))
 
 	if !nft.DryRun {
 		if err := nft.Conn.Flush(); err != nil {
-			return fmt.Errorf(`adding regular chain "%s" failed: %w`, nft.RegChain.Name, err)
+			return fmt.Errorf(`adding chain "%s" to table "%s" failed: %w`, chain.Name, nft.Table.Name, err)
 		}
-		log.Printf(`added chain "%s" in table "%s"`, nft.RegChain.Name, nft.Table.Name)
+		log.Printf(`added chain "%s" in table "%s"`, chain.Name, nft.Table.Name)
 	}
 
 	return nil
+}
+
+func (nft *NFTables) addTableAndFlush() error {
+	if ok, err := nft.isTableConfigured(nft.Table); err != nil {
+		return fmt.Errorf(`adding table "%s" failed: %w`, nft.Table.Name, err)
+	} else if ok {
+		return nil
+	}
+	nft.Conn.AddTable(nft.Table)
+	nft.Commands = fmt.Sprintf("%s%s\n", nft.Commands, addTableToString(nft.Table))
+	if !nft.DryRun {
+		if err := nft.Conn.Flush(); err != nil {
+			return fmt.Errorf(`adding table "%s" failed: %w`, nft.Table.Name, err)
+		}
+		log.Printf(`added table "%s"`, nft.Table.Name)
+	}
+
+	return nil
+}
+
+func (nft *NFTables) addBaseChainsAndFlush() error {
+	if !nft.AddBaseObj {
+		return ErrNftablesAddBaseObj
+	}
+	if err := nft.addChainAndFlush(nft.FwdChain); err != nil {
+		return err
+	}
+	if err := nft.addChainAndFlush(nft.InChain); err != nil {
+		return err
+	}
+	return nil
+}
+
+// addChainAndFlush commits the target chain into the kernel
+func (nft *NFTables) addRegChainAndFlush() error {
+	return nft.addChainAndFlush(nft.RegChain)
 }
 
 // delChainAndFlush deletes the target chain form the kernel
@@ -834,12 +956,10 @@ func (nft *NFTables) addIpsToSet(idx SetIdx, ips []string, timeout time.Duration
 	l, i := 0, 0
 	for i = 0; i < len(ips); i += l {
 		l = sElements.addIps(ips[i:], timeout)
-		fmt.Printf("l: %d\n", l)
 		if l == 0 {
 			break
 		}
 		cnt += nft.setAddElements(set, elements[0:l])
-		fmt.Printf("cnt: %d\n", cnt)
 		if l >= len(ips[i:]) {
 			break
 		}
