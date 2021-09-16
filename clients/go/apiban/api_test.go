@@ -117,7 +117,7 @@ func TestApi(t *testing.T) {
 		FwdChain:    "FORWARD",
 		InChain:     "INPUT",
 		TgtChain:    "MONITORING",
-		DryRun:      false,
+		DryRun:      true,
 		UseNftables: true,
 	}
 	InitEncryption(&config)
