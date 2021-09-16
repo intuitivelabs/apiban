@@ -122,7 +122,7 @@ func TestApi(t *testing.T) {
 	}
 	InitEncryption(&config)
 	RegisterIpApis("", "", "")
-	if _, err := InitializeFirewall("blacklist", "whitelist", config.DryRun); err != nil {
+	if _, err := InitializeFirewall("blacklist", "whitelist", config.DryRun, true); err != nil {
 		t.Fatalf("failed to initialize firewall: %s", err)
 	}
 	t.Run("ipblack parse", func(t *testing.T) {

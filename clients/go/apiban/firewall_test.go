@@ -3,7 +3,6 @@ package apiban
 import (
 	"errors"
 	"fmt"
-	"github.com/google/nftables"
 	"strconv"
 	"testing"
 	"time"
@@ -46,6 +45,15 @@ func TestNftables(t *testing.T) {
 		nft     *NFTables
 		cleanup bool = true
 	)
+	config = Config{
+		Passphrase:  "reallyworks?",
+		Table:       "intuitive",
+		FwdChain:    "FORWARD",
+		InChain:     "INPUT",
+		TgtChain:    "MONITORING",
+		DryRun:      false,
+		UseNftables: true,
+	}
 	if ips, err = generateAddrRange("10", 10); err != nil {
 		t.Fatalf("could not generate address range %s", err)
 	}
@@ -54,53 +62,88 @@ func TestNftables(t *testing.T) {
 		t.Fatalf("could parse duration %s", err)
 	}
 	t.Run("initialize nftables", func(t *testing.T) {
-		nft, err = InitializeNFTables("filter", "FORWARD", "INPUT", "MONITORING", "blacklist", "whitelist", false)
+		fw, err := InitializeFirewall("blacklist", "whitelist", config.DryRun, true)
 		if err != nil {
 			t.Fatalf("%s", err)
 		}
+		nft = fw.(*NFTables)
 		if nft == nil {
 			t.Fatalf("nftables was not correctly initialized")
 		}
-		if chains, err := nft.Conn.ListChains(); err != nil {
+		tables, err := nft.Conn.ListTables()
+		if err != nil {
 			t.Fatalf("%s", err)
+		}
+		found := false
+		for _, table := range tables {
+			if table.Name == nft.Table.Name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf(`table "%s" not found`, nft.Table.Name)
+		}
+		chains, err := nft.Conn.ListChains()
+		if err != nil {
+			t.Fatalf("%s", err)
+		}
+		// check that the target chain was created
+		var (
+			cnt = 0
+		)
+		for _, chain := range chains {
+			if chain.Table.Name != nft.Table.Name {
+				continue
+			}
+			if chain.Name == config.TgtChain {
+				if !areChainsEql(chain, nft.RegChain) {
+					t.Fatalf(`chain "%s" was not properly created`, config.TgtChain)
+				}
+				cnt++
+			}
+			if chain.Name == config.FwdChain {
+				if !areChainsEql(chain, nft.FwdChain) {
+					t.Fatalf(`configured chain "%s" different from system chain "%s"`, chainToString(nft.FwdChain), chainToString(chain))
+				}
+				cnt++
+			}
+			if chain.Name == config.InChain {
+				if !areChainsEql(chain, nft.InChain) {
+					t.Fatalf(`configured chain "%s" different from system chain "%s"`, chainToString(nft.InChain), chainToString(chain))
+				}
+				cnt++
+			}
+		}
+		if cnt < 3 {
+			t.Fatalf(`only %d out of 3 chains were properly created`, cnt)
+		}
+		if rule, err := nft.getFirstRule(nft.FwdChain); err != nil {
+			t.Fatalf(`get rules failure %s`, err)
 		} else {
-			// check that the target chain was created
-			var chain *nftables.Chain
-			for _, chain = range chains {
-				if chain.Name == "MONITORING" {
+			if !areRulesEql(rule, nft.Rules[FwdRuleIdx], true) {
+				t.Fatalf(`rules mismatch in chain %s`, nft.FwdChain.Name)
+			}
+		}
+		if rule, err := nft.getFirstRule(nft.InChain); err != nil {
+			t.Fatalf(`get rules failure %s`, err)
+		} else {
+			if !areRulesEql(rule, nft.Rules[InRuleIdx], true) {
+				t.Fatalf(`rules mismatch in chain %s`, nft.InChain.Name)
+			}
+		}
+		if rules, err := nft.Conn.GetRule(nft.Table, nft.RegChain); err != nil {
+			t.Fatalf(`cannot get rules for table %s chain %s: %s`, nft.Table.Name, nft.RegChain.Name, err)
+		} else {
+			if len(rules) < 2 {
+				t.Fatalf(`invalid number of rules for table %s chain %s`, nft.Table.Name, nft.RegChain.Name)
+			}
+			for i, rule := range rules {
+				if i > 1 {
 					break
 				}
-			}
-			if chain == nil || chain.Name != "MONITORING" || chain.Table.Name != nft.Table.Name {
-				t.Fatalf(`chain "MONITORING" was not properly created`)
-			}
-			if rule, err := nft.getFirstRule(nft.FwdChain); err != nil {
-				t.Fatalf(`get rules failure %s`, err)
-			} else {
-				if !areRulesEql(rule, nft.Rules[FwdRuleIdx], true) {
-					t.Fatalf(`rules mismatch in chain %s`, nft.FwdChain.Name)
-				}
-			}
-			if rule, err := nft.getFirstRule(nft.InChain); err != nil {
-				t.Fatalf(`get rules failure %s`, err)
-			} else {
-				if !areRulesEql(rule, nft.Rules[InRuleIdx], true) {
-					t.Fatalf(`rules mismatch in chain %s`, nft.InChain.Name)
-				}
-			}
-			if rules, err := nft.Conn.GetRule(nft.Table, chain); err != nil {
-				t.Fatalf(`cannot get rules for table %s chain %s: %s`, nft.Table.Name, chain.Name, err)
-			} else {
-				if len(rules) < 2 {
-					t.Fatalf(`invalid number of rules for table %s chain %s`, nft.Table.Name, chain.Name)
-				}
-				for i, rule := range rules {
-					if i > 1 {
-						break
-					}
-					if !areRulesEql(rule, nft.Rules[i+WlRuleIdx], true) {
-						t.Fatalf(`mismatching rules for table %s chain %s`, nft.Table.Name, chain.Name)
-					}
+				if !areRulesEql(rule, nft.Rules[i+WlRuleIdx], true) {
+					t.Fatalf(`mismatching rules for table %s chain %s`, nft.Table.Name, nft.RegChain.Name)
 				}
 			}
 		}
