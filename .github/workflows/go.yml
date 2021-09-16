@@ -10,7 +10,7 @@ jobs:
     - uses: actions/checkout@v2
 
     - name: Install nftables
-      run: sudo apt-get install nftables
+      run: sudo apt-get install nftables; sudo nft -a list ruleset
 
     - name: Set up Go
       uses: actions/setup-go@v2
