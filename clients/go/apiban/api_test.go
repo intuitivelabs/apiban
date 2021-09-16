@@ -111,12 +111,18 @@ func TestApi(t *testing.T) {
 	}
   ]
 }`)
-	config := Config{
-		Passphrase: "reallyworks?",
+	config = Config{
+		Passphrase:  "reallyworks?",
+		Table:       "filter",
+		FwdChain:    "FORWARD",
+		InChain:     "INPUT",
+		TgtChain:    "MONITORING",
+		DryRun:      false,
+		UseNftables: true,
 	}
 	InitEncryption(&config)
 	RegisterIpApis("", "", "")
-	if _, err := InitializeFirewall("blacklist", "whitelist", true); err != nil {
+	if _, err := InitializeFirewall("blacklist", "whitelist", config.DryRun); err != nil {
 		t.Fatalf("failed to initialize firewall: %s", err)
 	}
 	t.Run("ipblack parse", func(t *testing.T) {
