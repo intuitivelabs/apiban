@@ -9,7 +9,7 @@ jobs:
     steps:
     - uses: actions/checkout@v2
 
-    - name: Install nftables
+    - name: Install nftables, ipset
       run: sudo apt-get install nftables ipset
 
     - name: Set up Go
