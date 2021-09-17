@@ -32,14 +32,7 @@ type Api struct {
 	ResponseProc func(IpVector, time.Duration) (int, error)
 }
 
-// use insecure if configured - TESTING PURPOSES ONLY!
 var (
-	transCfg = &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	}
-
-	httpClient = &http.Client{Transport: transCfg}
-
 	// API register
 	Apis [4]*Api
 )

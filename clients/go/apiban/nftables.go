@@ -15,8 +15,15 @@ import (
 var (
 	ErrNftablesAddBaseObj = errors.New("nftables intialization error: adding base objects is not allowed")
 	ErrNftablesInit       = "nftables intialization error: %w"
-	ErrAddBaseChainRule   = "failed to add base chain rule: %w"
-	ErrAddSetElements     = `adding elements to set "%s" failed: %s`
+	ErrAddBaseChainRule   = "adding base chain rule failed: %w"
+	ErrAddSet             = `adding set "%s" failed: %w`
+	ErrAddSetElements     = `adding elements to set failed: %w`
+	ErrCommitSetElements  = `commiting elements to set "%s": %w`
+	ErrAddChain           = `adding chain "%s" to table "%s" failed: %w`
+	ErrAddTable           = `adding table "%s" failed: %w`
+	ErrDelRule            = `deleting rule with handle %d from table "%s" chain "%s" failed: %w`
+	ErrDelRules           = `deleting rules from table "%s" failed: %w`
+	ErrDelSets            = `deleting sets from the kernel failed: %w`
 )
 
 // define a new type and implement a method which is used for adding IP addresses into a SetElement
@@ -605,14 +612,14 @@ func (nft *NFTables) addSetsAndFlush() error {
 	// add sets
 	for _, set := range nft.Sets {
 		if err := nft.Conn.AddSet(set, nil); err != nil {
-			return fmt.Errorf(`AddSet "%s" failed: %w`, set.Name, err)
+			return fmt.Errorf(ErrAddSetElements, err)
 		}
 		nft.Commands = fmt.Sprintf("%s%s\n", nft.Commands, addSetToString(*set))
 	}
 
 	if !nft.DryRun {
 		if err := nft.Conn.Flush(); err != nil {
-			return fmt.Errorf(`commiting sets to kernel failed: %w`, err)
+			return fmt.Errorf(ErrAddSetElements, err)
 		}
 	}
 
@@ -628,7 +635,7 @@ func (nft *NFTables) delSetsAndFlush() error {
 
 	if !nft.DryRun {
 		if err := nft.Conn.Flush(); err != nil {
-			return fmt.Errorf(`deleting sets from the kernel failed: %w`, err)
+			return fmt.Errorf(ErrDelSets, err)
 		}
 	}
 
@@ -638,7 +645,7 @@ func (nft *NFTables) delSetsAndFlush() error {
 func (nft *NFTables) addChainAndFlush(chain *nftables.Chain) error {
 	// check if chain is already configured in the kernel
 	if ok, err := nft.chainExists(chain); err != nil {
-		return fmt.Errorf(`adding chain "%s" to table "%s" failed: %w`, chain.Name, chain.Table.Name, err)
+		return fmt.Errorf(ErrAddChain, chain.Name, chain.Table.Name, err)
 	} else if ok {
 		return nil
 	}
@@ -648,7 +655,7 @@ func (nft *NFTables) addChainAndFlush(chain *nftables.Chain) error {
 
 	if !nft.DryRun {
 		if err := nft.Conn.Flush(); err != nil {
-			return fmt.Errorf(`adding chain "%s" to table "%s" failed: %w`, chain.Name, nft.Table.Name, err)
+			return fmt.Errorf(ErrAddChain, chain.Name, nft.Table.Name, err)
 		}
 		log.Printf(`added chain "%s" in table "%s"`, chain.Name, nft.Table.Name)
 	}
@@ -658,7 +665,7 @@ func (nft *NFTables) addChainAndFlush(chain *nftables.Chain) error {
 
 func (nft *NFTables) addTableAndFlush() error {
 	if ok, err := nft.tableExists(nft.Table); err != nil {
-		return fmt.Errorf(`adding table "%s" failed: %w`, nft.Table.Name, err)
+		return fmt.Errorf(ErrAddTable, nft.Table.Name, err)
 	} else if ok {
 		return nil
 	}
@@ -666,7 +673,7 @@ func (nft *NFTables) addTableAndFlush() error {
 	nft.Commands = fmt.Sprintf("%s%s\n", nft.Commands, addTableToString(nft.Table))
 	if !nft.DryRun {
 		if err := nft.Conn.Flush(); err != nil {
-			return fmt.Errorf(`adding table "%s" failed: %w`, nft.Table.Name, err)
+			return fmt.Errorf(ErrAddTable, nft.Table.Name, err)
 		}
 		log.Printf(`added table "%s"`, nft.Table.Name)
 	}
@@ -707,13 +714,14 @@ func (nft *NFTables) delRegChainAndFlush() error {
 }
 
 func (nft *NFTables) delRuleAndFlush(rule *nftables.Rule) error {
-	nft.Conn.DelRule(rule)
+	if err := nft.Conn.DelRule(rule); err != nil {
+		return fmt.Errorf(ErrDelSets, rule.Handle, nft.Table.Name, rule.Chain.Name, err)
+	}
 	nft.Commands = fmt.Sprintf("%s%s\n", nft.Commands, deleteRuleToString(rule))
 	if !nft.DryRun {
 		if err := nft.Conn.Flush(); err != nil {
 			// TODO: rollback
-			return fmt.Errorf(`deleting rule with handle %d from table "%s" chain "%s" failed: %w`,
-				rule.Handle, nft.Table.Name, rule.Chain.Name, err)
+			return fmt.Errorf(ErrDelSets, rule.Handle, nft.Table.Name, rule.Chain.Name, err)
 		}
 	}
 	return nil
@@ -895,13 +903,12 @@ func (nft *NFTables) delRulesAndFlush() error {
 	)
 	for _, rule := range nft.Rules {
 		if err = nft.Conn.DelRule(rule); err != nil {
-			return fmt.Errorf(`"%s" table rules delete failed: %w`, nft.Table.Name, err)
+			return fmt.Errorf(ErrDelRules, nft.Table.Name, err)
 		}
 	}
 	if !nft.DryRun {
 		if err := nft.Conn.Flush(); err != nil {
-			return fmt.Errorf(`"%s" table rules delete - commit to kernel failed: %w`,
-				nft.Table.Name, err)
+			return fmt.Errorf(ErrDelRules, nft.Table.Name, err)
 		}
 	}
 	return nil
@@ -939,10 +946,12 @@ func (nft *NFTables) setAddElements(set *nftables.Set, elements []nftables.SetEl
 }
 
 func (nft *NFTables) setAddElementsAndFlush(set *nftables.Set, elements []nftables.SetElement) (err error) {
-	nft.Conn.SetAddElements(set, elements)
+	if err = nft.Conn.SetAddElements(set, elements); err != nil {
+		return fmt.Errorf(ErrAddSetElements, set.Name, err)
+	}
 	if !nft.DryRun {
 		if err = nft.Conn.Flush(); err != nil {
-			return fmt.Errorf(`commiting set elements to kernel failed: %w`, err)
+			return fmt.Errorf(ErrAddSetElements, set.Name, err)
 		}
 	}
 	return nil

@@ -1,13 +1,10 @@
 package apiban
 
 import (
-	"encoding/xml"
 	"fmt"
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/vladabroz/go-ipset/ipset"
 	"log"
-	"os/exec"
-	"reflect"
 	"strings"
 	"time"
 )
@@ -94,55 +91,6 @@ func InitializeIPTables(chain, bl, wl string, dryRun bool) (*IPTables, error) {
 	return ipTables, nil
 }
 
-func checkIPSet(ipsetname string) (bool, error) {
-	type IPSet struct {
-		XMLName    xml.Name `xml:"ipset"`
-		Name       string   `xml:"name,attr"`
-		Type       string   `xml:"type"`
-		References string   `xml:"references"`
-	}
-	type IPSets struct {
-		XMLName xml.Name `xml:"ipsets"`
-		IPSets  []IPSet  `xml:"ipset"`
-	}
-
-	var ipsets IPSets
-	//cmd := exec.Command("ipset", "list", "-t", "-o", "xml")
-	//ipsets := IPSetOutput{}
-	cmd := exec.Command("ipset", "list", "-t", "-o", "xml")
-	xmlout, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Fatalf("cmd.Run() failed with %s\n", err)
-	}
-	fmt.Printf("combined out:\n%s\n", string(xmlout))
-	// read our opened xmlFile as a byte array.
-	//byteValue, _ := ioutil.ReadAll(xmlFile)
-	fmt.Println("Type of xmlout", reflect.TypeOf(xmlout))
-
-	//testxml := xml.Unmarshal(xmlout, &ipsets)
-	if err := xml.Unmarshal(xmlout, &ipsets); err != nil {
-		panic(err)
-	}
-	fmt.Println(ipsets)
-	//fmt.Printf("ipsetnames :\n%s\n", string(ipsets.XMLName))
-	fmt.Printf("ipsetnames :\n%s\n", ipsets.IPSets[1].Name)
-	//testxml := xml.Unmarshal(byteValue, &ipsets)
-	for i := 0; i < len(ipsets.IPSets); i++ {
-		fmt.Println("IPSet Type: " + ipsets.IPSets[i].Type)
-		fmt.Println("IPSet Name: " + ipsets.IPSets[i].Name)
-		if ipsets.IPSets[i].Name == ipsetname {
-			fmt.Println("IPSET ALREADY EXISTING")
-			return true, nil
-		}
-	}
-
-	//out, err := cmd.CombinedOutput()
-	//fmt.Printf("XML :\n%s\n", ipset.Name)
-	//fmt.Printf("testXML :\n%s\n", testxml)
-	//fmt.Printf("ipsetnames :\n%s\n", string(ipsets.Name))
-	return false, nil
-}
-
 func IpTables() *IPTables {
 	return ipTables
 }
@@ -215,14 +163,14 @@ func (ipt *IPTables) InsertIpsetRule(table, chain, set string, accept bool) (err
 		target = "DROP"
 	}
 	// create the ipset and get a handle to it (if the set exists it is NOT flushed)
-	if s, mapOk := ipt.Sets[set]; !mapOk {
+	if _, mapOk := ipt.Sets[set]; !mapOk {
 		// this ipset was not created yet
 		log.Printf(`exec: "ipset create %s hash:ip family inet hashsize 1024 maxelem 65536 timeout 0 -exist"`, set)
 		ipt.Commands = fmt.Sprintf("%sipset create %s hash:ip family inet hashsize 1024 maxelem 65536 timeout 0 -exist\n", ipt.Commands, set)
 		if !ipt.dryRun {
-			s, err = ipset.New(set, "hash:ip", &ipset.Params{})
-			if err != nil {
-				err = fmt.Errorf(`create ipset "%s" error: %w`, set, err)
+			s, ipsetErr := ipset.New(set, "hash:ip", &ipset.Params{})
+			if ipsetErr != nil {
+				err = fmt.Errorf(`create ipset "%s" error: %w`, set, ipsetErr)
 				return
 			}
 			// store the newly created ipset
