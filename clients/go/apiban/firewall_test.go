@@ -176,3 +176,70 @@ func TestNftables(t *testing.T) {
 		}
 	}
 }
+
+func TestIptables(t *testing.T) {
+	var (
+		err error
+		ips []string
+		nft *NFTables
+		ipt *IPTables
+		//cleanup bool = true
+	)
+	config = Config{
+		Passphrase:  "reallyworks?",
+		TgtChain:    "MONITORING",
+		DryRun:      false,
+		UseNftables: false,
+	}
+	if ips, err = generateAddrRange("10", 10); err != nil {
+		t.Fatalf("could not generate address range %s", err)
+	}
+	u, err := time.ParseDuration("1m")
+	if err != nil {
+		t.Fatalf("could parse duration %s", err)
+	}
+	t.Run("initialize iptables", func(t *testing.T) {
+		fw, err := InitializeFirewall("blacklist", "whitelist", config.DryRun, false)
+		if err != nil {
+			t.Fatalf("%s", err)
+		}
+		ipt = fw.(*IPTables)
+		if ipt == nil {
+			t.Fatalf("iptables was not correctly initialized")
+		}
+		// Check if the rules in the base chains exists
+		ok, err := ipTables.t.Exists("filter", "INPUT", "-j", config.TgtChain)
+		if err != nil || !ok {
+			t.Fatalf("iptables does not contain target chain %s rule in chain INPUT", config.TgtChain)
+		}
+		ok, err = ipTables.t.Exists("filter", "FORWARD", "-j", config.TgtChain)
+		if err != nil || !ok {
+			t.Fatalf("iptables does not contain target chain %s rule in chain FORWARD", config.TgtChain)
+		}
+		// Check if the rules in the target chain exists
+		ok, err = ipTables.t.Exists("filter", config.TgtChain, "-m", "set", "--match-set", "blacklist", "src", "-j", "DROP")
+		if err != nil || !ok {
+			t.Fatalf("iptables does not contain blacklist rule in chain %s", config.TgtChain)
+		}
+		ok, err = ipTables.t.Exists("filter", config.TgtChain, "-m", "set", "--match-set", "whitelist", "src", "-j", "ACCEPT")
+		if err != nil || !ok {
+			t.Fatalf("iptables does not contain whitelist rule in chain %s", config.TgtChain)
+		}
+	})
+	t.Run("blacklist", func(t *testing.T) {
+		if ipt == nil {
+			t.Skipf("iptables was not properly initialized")
+		}
+		if _, err := ipt.AddToBlacklist(ips[:], u); err != nil {
+			t.Fatalf("could not add ip to set %s", err)
+		}
+	})
+	t.Run("whitelist", func(t *testing.T) {
+		if nft == nil {
+			t.Skipf("iptables was not properly initialized")
+		}
+		if _, err := ipt.AddToWhitelist(ips[:], u); err != nil {
+			t.Fatalf("could not add ip to set %s", err)
+		}
+	})
+}
