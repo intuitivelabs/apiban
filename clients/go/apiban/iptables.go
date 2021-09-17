@@ -229,7 +229,7 @@ func (ipt *IPTables) InsertIpsetRule(table, chain, set string, accept bool) (err
 			ipt.Sets[set] = s
 		}
 	}
-	// Check if rule in ipset based rule in blocking chain
+	// Check if the rule exists
 	exists, iptablesErr := ipTables.t.Exists(table, chain, "-m", "set", "--match-set", set, "src", "-j", target)
 	if iptablesErr != nil {
 		// terminate only if not running in dry run mode
