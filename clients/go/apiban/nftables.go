@@ -268,8 +268,12 @@ func addChainToString(c *nftables.Chain) string {
 	return fmt.Sprintf("nft add %s", chainToString(c))
 }
 
+func tableToString(t *nftables.Table) string {
+	return fmt.Sprintf("table %s", t.Name)
+}
+
 func addTableToString(t *nftables.Table) string {
-	return fmt.Sprintf("nft add %s", t.Name)
+	return fmt.Sprintf("nft add %s", tableToString(t))
 }
 
 //newNFTables initializes an NFTables structure for firewall use.
@@ -539,7 +543,7 @@ func (nft *NFTables) findEqlRules(rule *nftables.Rule) (eqlRules []*nftables.Rul
 	return
 }
 
-func (nft *NFTables) isChainConfigured(chain *nftables.Chain) (ok bool, err error) {
+func (nft *NFTables) chainExists(chain *nftables.Chain) (ok bool, err error) {
 	ok = false
 	err = nil
 	if chains, e := nft.Conn.ListChains(); e != nil {
@@ -555,7 +559,7 @@ func (nft *NFTables) isChainConfigured(chain *nftables.Chain) (ok bool, err erro
 	return
 }
 
-func (nft *NFTables) isTableConfigured(table *nftables.Table) (ok bool, err error) {
+func (nft *NFTables) tableExists(table *nftables.Table) (ok bool, err error) {
 	ok = false
 	err = nil
 	if tables, e := nft.Conn.ListTables(); e != nil {
@@ -633,7 +637,7 @@ func (nft *NFTables) delSetsAndFlush() error {
 
 func (nft *NFTables) addChainAndFlush(chain *nftables.Chain) error {
 	// check if chain is already configured in the kernel
-	if ok, err := nft.isChainConfigured(chain); err != nil {
+	if ok, err := nft.chainExists(chain); err != nil {
 		return fmt.Errorf(`adding chain "%s" to table "%s" failed: %w`, chain.Name, chain.Table.Name, err)
 	} else if ok {
 		return nil
@@ -653,7 +657,7 @@ func (nft *NFTables) addChainAndFlush(chain *nftables.Chain) error {
 }
 
 func (nft *NFTables) addTableAndFlush() error {
-	if ok, err := nft.isTableConfigured(nft.Table); err != nil {
+	if ok, err := nft.tableExists(nft.Table); err != nil {
 		return fmt.Errorf(`adding table "%s" failed: %w`, nft.Table.Name, err)
 	} else if ok {
 		return nil
