@@ -143,7 +143,7 @@ func main() {
 
 	//TODO debug
 	//fmt.Println("Initializing firewall...")
-	if _, err := apiban.InitializeFirewall("blacklist", "whitelist", apiconfig.DryRun, false); err != nil {
+	if _, err := apiban.InitializeFirewall("blacklist", "whitelist", apiconfig.DryRun, apiconfig.AddBaseObj); err != nil {
 		log.Fatalln("failed to initialize firewall: ", err)
 	}
 
