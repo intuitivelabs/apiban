@@ -28,14 +28,17 @@ var (
 
 // Config is the structure for the JSON config file
 type Config struct {
-	Apikey  string        `long:"APIKEY" description:"api key"`
-	Token   string        `long:"TOKEN" description:"SSO token"`
-	Lkid    string        `long:"LKID" description:"lk id"`
-	Version string        `long:"VERSION" description:"protocol version"`
-	Url     string        `long:"URL" description:"URL of blacklisted IPs DB"`
-	Chain   string        `long:"CHAIN" description:"ipset chain name for matching entries"`
-	Tick    time.Duration `long:"INTERVAL" description:"interval for the list refresh"`
-	Full    string        `long:"FULL" description:"yes/no - starting from scratch"`
+	Apikey   string        `long:"APIKEY" description:"api key"`
+	Token    string        `long:"TOKEN" description:"SSO token"`
+	Lkid     string        `long:"LKID" description:"lk id"`
+	Version  string        `long:"VERSION" description:"protocol version"`
+	Url      string        `long:"URL" description:"URL of blacklisted IPs DB"`
+	TgtChain string        `long:"CHAIN" description:"netfilter target chain used for matching entries"`
+	Table    string        `long:"TABLE" description:"netfilter filter table"`
+	FwdChain string        `long:"FORWARD" description:"netfilter forwarding base chain"`
+	InChain  string        `long:"INPUT" description:"netfilter input base chain"`
+	Tick     time.Duration `long:"INTERVAL" description:"interval for the list refresh"`
+	Full     string        `long:"FULL" description:"yes/no - starting from scratch"`
 	// state filename
 	StateFilename string `long:"STATE_FILENAME" description:"filename for keeping the state"`
 	// ttl for the firewall DROP rules
@@ -46,6 +49,9 @@ type Config struct {
 	EncryptionKey string `long:"ENCRYPTION_KEY" description:"encryption key as a hex string (password and key must not be set in the same time)"`
 
 	LogFilename string       `short:"l" long:"log" description:"log file or - for stdout"`
+	UseNftables bool         `short:"n" long:"nftables" description:"use nftables APIs for firewall rules"`
+	DryRun      bool         `short:"d" long:"dryrun" description:"only show the required firewall changes"`
+	AddBaseObj  bool         `short:"a" long:"add" description:"adds nftables base objects to the system"`
 	SetCfgFile  func(string) `short:"c" long:"config" description:"config file"`
 	Pdefaults   func()       `long:"defaults" description:"print default config"`
 	Pconfig     func(bool)   `long:"dump_cfg" optional:"1" optional-value:"0" description:"print current config, use true or 1 for condensed version"`
@@ -55,10 +61,16 @@ type Config struct {
 
 var DefaultConfig = Config{
 	Url:         "https://siem.intuitivelabs.com/api/",
-	Chain:       "BLOCKER",
+	TgtChain:    "BLOCKER",
+	Table:       "filter",
+	FwdChain:    "forward",
+	InChain:     "input",
 	LogFilename: "/var/log/apiban-ipsets.log",
 	Tick:        60 * time.Second,
 	Full:        "no",
+	UseNftables: true,
+	DryRun:      false,
+	AddBaseObj:  true,
 }
 
 // global configuration
@@ -85,7 +97,7 @@ func LoadConfig() (*Config, error) {
 		}
 		if cfgFileCnt > 10 {
 			errCfgFile = fmt.Errorf("too many config files loaded"+
-				" (%d, current %w)", cfgFileCnt, f)
+				" (%d, current %s)", cfgFileCnt, f)
 			return
 		}
 		fmt.Printf("loading config file %q ...\n", f)
@@ -128,9 +140,7 @@ func LoadConfig() (*Config, error) {
 
 		// Add standard static locations
 		filenames = append(filenames, defaultConfigFilenames[:]...)
-
 		for _, loc := range filenames {
-
 			err := flags.IniParse(loc, cfg)
 			if err != nil {
 				if _, ok := err.(*os.PathError); ok {
@@ -171,7 +181,6 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return cfg, nil
-
 }
 
 func FixConfig(apiconfig *Config) error {
@@ -190,8 +199,17 @@ func FixConfig(apiconfig *Config) error {
 	}
 
 	// use default
-	if len(apiconfig.Chain) == 0 {
-		apiconfig.Chain = "BLOCKER"
+	if len(apiconfig.Table) == 0 {
+		apiconfig.Table = DefaultConfig.Table
+	}
+	if len(apiconfig.TgtChain) == 0 {
+		apiconfig.TgtChain = DefaultConfig.TgtChain
+	}
+	if len(apiconfig.FwdChain) == 0 {
+		apiconfig.FwdChain = DefaultConfig.FwdChain
+	}
+	if len(apiconfig.InChain) == 0 {
+		apiconfig.InChain = DefaultConfig.InChain
 	}
 	return nil
 }

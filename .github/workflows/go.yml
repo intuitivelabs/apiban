@@ -1,0 +1,24 @@
+name: Go
+
+on: [push, pull_request]
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+
+    - name: Install nftables, ipset
+      run: sudo apt-get install nftables ipset
+
+    - name: Set up Go
+      uses: actions/setup-go@v2
+      with:
+        go-version: 1.17
+
+    - name: Build
+      run: (cd clients/go; go build -v ./...)
+
+    - name: Test
+      run: (cd clients/go/apiban; sudo go test -v ./...)

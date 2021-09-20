@@ -19,6 +19,7 @@ type Response interface {
 }
 
 type Api struct {
+	Name     string
 	Client   http.Client
 	ConfigId string
 	BaseUrl  string
@@ -26,16 +27,15 @@ type Api struct {
 	// timestamp to use for the next request
 	Timestamp string
 	// query parameters are stored here
-	Values url.Values
-	Code   APICode
+	Values       url.Values
+	Code         APICode
+	ResponseProc func(IpVector, time.Duration) (int, error)
 }
 
-// use insecure if configured - TESTING PURPOSES ONLY!
-var transCfg = &http.Transport{
-	TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-}
-
-var httpClient = &http.Client{Transport: transCfg}
+var (
+	// API register
+	Apis [4]*Api
+)
 
 // API response JSON objects
 var IPMapKeys = [...]string{"IP", "fromua", "encrypt", "exceeded", "count", "timestamp"}
@@ -43,12 +43,19 @@ var MetadataKeys = [...]string{"defaultBlacklistTtl"}
 
 type JSONMap map[string]interface{}
 
+// API codes
 type APICode int
 
 const (
-	APIBanned APICode = iota
-	APIAllowed
-	APIUri
+	IpBanned APICode = iota
+	IpAllowed
+	UriBanned
+	UriAllowed
+)
+
+// API paths
+const (
+	BwV4List = "bwnoa/v4list"
 )
 
 // errors
@@ -59,6 +66,7 @@ var (
 	// blocked (when calling Check) and that the list is complete (when calling
 	// Banned)
 	ErrBadRequest = errors.New("Bad Request")
+	ErrUnknownApi = errors.New("Unknown API code")
 	// API JSON errors
 	ErrJsonParser                              = errors.New(`cannot parse JSON response`)
 	ErrJsonMetadataDefaultBlacklistTtlMissing  = errors.New(`malformed JSON response: "defaultBlacklistTtl not present in metadata`)
@@ -106,46 +114,14 @@ var (
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
-	bannedApi Api = Api{
-		Values: url.Values{},
-		Client: defaultHttpClient,
-	}
-	allowedApi Api = Api{
-		Values: url.Values{},
-		Client: defaultHttpClient,
-	}
-	uriApi Api = Api{
-		Values: url.Values{},
-		Client: defaultHttpClient,
-	}
 )
 
-// NewBannedApi returns an initialized Api object which can be used for retrieving blacklisted IP addresses
-func NewBannedApi(configId, baseUrl, token string) *Api {
-	bannedApi.init(configId, baseUrl, "bwnoa/v4list", token, APIBanned)
-	bannedApi.Values.Add("list", "ipblack")
-	return &bannedApi
-}
-
-// NewAllowedApi returns an initialized Api object which can be used for retrieving whitelisted IP addresses
-func NewAllowedApi(configId, baseUrl, token string) *Api {
-	allowedApi.init(configId, baseUrl, "bwnoa/v4list", token, APIAllowed)
-	allowedApi.Values.Add("list", "ipwhite")
-	return &allowedApi
-}
-
-// NewUriApi returns an initialized Api object which can be used for retrieving URIs
-func NewUriApi(configId, baseUrl, token string) *Api {
-	uriApi.init(configId, baseUrl, "bwnoa/v4list", token, APIUri)
-	uriApi.Values.Add("list", "uri")
-	return &uriApi
-}
-
 // init the members of Api data structure
-func (api *Api) init(configId, baseUrl, path, token string, code APICode) {
-	for k, _ := range api.Values {
+func (api *Api) init(name, configId, baseUrl, path, token string, code APICode) {
+	for k := range api.Values {
 		delete(api.Values, k)
 	}
+	api.Name = name
 	api.Code = code
 	if len(configId) == 0 {
 		configId = "0"
@@ -157,6 +133,11 @@ func (api *Api) init(configId, baseUrl, path, token string, code APICode) {
 	if len(token) > 0 {
 		api.Values.Add("token", token)
 	}
+}
+
+// string conversion
+func (api *Api) String() string {
+	return `API "` + api.Name + `" URL: ` + api.Url()
 }
 
 // Request sends an API request by encoding the URL and using after that Get().
@@ -172,18 +153,11 @@ func (api *Api) Request() (Response, error) {
 
 // RequestWithQueryValues sends an API request by encoding the URL and using after that Get().
 func (api *Api) RequestWithQueryValues() (Response, error) {
-	var apiUrl string
+	url := api.Url()
 
-	query := api.Values.Encode()
-
-	if len(query) > 0 {
-		apiUrl = fmt.Sprintf("%s%s?%s", api.BaseUrl, api.Path, query)
-	} else {
-		apiUrl = fmt.Sprintf("%s%s", api.BaseUrl, api.Path)
-	}
-	log.Printf(`"%s" api url: %s`, api.Path, apiUrl)
-	//e, err := queryServer(httpClient, apiUrl)
-	buf, err := api.Get(apiUrl)
+	// TODO debug
+	//log.Printf(`"%s" api url: %s`, api.Path, url)
+	buf, err := api.Get(url)
 	if err != nil {
 		return nil, err
 	}
@@ -193,12 +167,11 @@ func (api *Api) RequestWithQueryValues() (Response, error) {
 		return nil, err
 	}
 	return response, nil
-
 }
 
 // Response processes the answer received from the API server
-func (api *Api) Response(msg Response) {
-	msg.Process(api)
+func (api *Api) Response(msg Response) error {
+	return msg.Process(api)
 }
 
 // Process sends an HTTP request and processes the received request.
@@ -211,9 +184,23 @@ func (api *Api) Process() (err error) {
 	} else if res == nil {
 		err = fmt.Errorf(`%s response with empty body`, api.Path)
 	} else {
-		api.Response(res)
+		err = api.Response(res)
 	}
 	return
+}
+
+func (api Api) Url() string {
+	var apiUrl string
+
+	query := api.Values.Encode()
+
+	if len(query) > 0 {
+		apiUrl = fmt.Sprintf("%s%s?%s", api.BaseUrl, api.Path, query)
+	} else {
+		apiUrl = fmt.Sprintf("%s%s", api.BaseUrl, api.Path)
+	}
+
+	return apiUrl
 }
 
 func (api Api) parseResponse(msg []byte) (Response, error) {
@@ -236,7 +223,6 @@ func (api Api) parseResponse(msg []byte) (Response, error) {
 	}
 
 	return nil, fmt.Errorf("%s: %w", ErrJsonParser.Error(), err)
-
 }
 
 func (api Api) Get(url string) ([]byte, error) {
@@ -264,13 +250,16 @@ func (api Api) Get(url string) ([]byte, error) {
 // Resource is a generic term for IP addressses, URIs; this interface should be implemented by all resources
 type Resource interface {
 	// Process locally the resource received from the server (by applying b/w listing, fw rules aso)
-	Process(ttl int, api APICode) error
+	// Process(ttl time.Duration, api APICode) error
+	Decrypt() (string, error)
 }
 
 // generic response object used for unmarshalling either IP or URI JSON objects
 type Element struct {
 	r Resource
 }
+
+type Elements []*Element
 
 // UnmarshalJSON decodes the element by using trial and error between IP and URI JSON objects
 func (elem *Element) UnmarshalJSON(msg []byte) error {
@@ -308,7 +297,8 @@ type JSONResponse struct {
 	ID string `json:"ID,omitempty"`
 
 	// an array of resources (either of: IP addr, URI) in this response
-	Elements []*Element `json:"elements"`
+	//Elements []*Element `json:"elements"`
+	Elements Elements `json:"elements"`
 }
 
 // ProcResponse processes the response returned by the GET API.
@@ -318,12 +308,15 @@ func (msg *JSONResponse) Process(api *Api) error {
 		return nil
 	}
 
-	ttl := int(GetConfig().BlacklistTtl / time.Second) // round-down to seconds
+	ttl := GetConfig().BlacklistTtl
 	if ttl == 0 {
 		// try to get the ttl from the answers metadata
-		ttl, _ = msg.Metadata.Ttl()
+		t, _ := msg.Metadata.Ttl()
+		ttl = time.Duration(t) * time.Second
 	}
-	log.Print("ttl: ", ttl)
+
+	// TODO debug
+	//log.Print("ttl: ", ttl)
 	if timestamp, err := msg.Metadata.Timestamp(); err != nil {
 		return err
 	} else {
@@ -331,21 +324,51 @@ func (msg *JSONResponse) Process(api *Api) error {
 	}
 
 	// process IP objects
-	msg.processElements(ttl, api)
-	return nil
+	cnt, err := msg.processElements(ttl, api)
+	if cnt < len(msg.Elements) {
+		log.Printf("processed %d out of %d elements", cnt, len(msg.Elements))
+	}
+	return err
 }
 
-func (msg *JSONResponse) processElements(ttl int, api *Api) {
-	for _, s := range msg.Elements {
-		err := msg.processElement(s, ttl, api)
-		if err != nil {
-			log.Printf("failed to process IP: %s", err.Error())
+func (msg *JSONResponse) processElements(ttl time.Duration, api *Api) (int, error) {
+	var (
+		i int = 0
+	)
+	if len(msg.Elements) == 0 {
+		return 0, nil
+	}
+	plainTxt := make([]string, len(msg.Elements))
+	for _, el := range msg.Elements {
+		if el == nil {
+			continue
+		}
+		if i > len(plainTxt) {
+			break
+		}
+		if b, err := el.r.Decrypt(); err != nil {
+			fmt.Printf("error decrypting \"%v\": %s\n", el.r, err)
+			continue
+		} else {
+			fmt.Printf("decrypted element: %s\n", b)
+			plainTxt[i] = b
+			i++
 		}
 	}
-}
-
-func (msg *JSONResponse) processElement(el *Element, ttl int, api *Api) error {
-	return el.r.Process(ttl, api.Code)
+	if i < len(plainTxt) {
+		log.Printf("%d out of %d elements were decrypted", i, len(plainTxt))
+	}
+	if i == 0 {
+		return 0, nil
+	}
+	switch api.Code {
+	case IpBanned:
+		return AddToBlacklist(plainTxt[0:i], ttl)
+	case IpAllowed:
+		return AddToWhitelist(plainTxt[0:i], ttl)
+	default:
+		return 0, ErrUnknownApi
+	}
 }
 
 // ErrResponse

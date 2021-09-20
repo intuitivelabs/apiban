@@ -16,14 +16,18 @@ import (
 // errors
 var (
 	// encryption errors
-	ErrEncryptNoKey    = errors.New("IP encrypted but no passphrase or encryption key configured")
-	ErrEncryptWrongKey = errors.New("IP encrypted but wrong passphrase or encryption key configured")
+	ErrEncryptNoKey    = errors.New("no passphrase or encryption key configured")
+	ErrEncryptWrongKey = errors.New("validation code does not match")
 )
 
 // anonymization objects
 var (
 	Ipcipher  cipher.Block            = nil
 	Validator anonymization.Validator = nil
+)
+
+const (
+	HmacLen = 5
 )
 
 func InitEncryption(c *Config) {
@@ -44,11 +48,12 @@ func InitEncryption(c *Config) {
 		// generate encryption key from passphrase
 		anonymization.GenerateKeyFromPassphraseAndCopy(c.Passphrase,
 			anonymization.EncryptionKeyLen, encKey[:])
-		log.Print("encryption key: ", hex.EncodeToString(encKey[:]))
+		//debug
+		//log.Print("encryption key: ", hex.EncodeToString(encKey[:]))
 	} else if len(c.EncryptionKey) > 0 {
 		// use the configured encryption key
 		// copy the configured key into the one used during realtime processing
-		if decoded, err := hex.DecodeString(c.EncryptionKey); err != nil {
+		if decoded, dErr := hex.DecodeString(c.EncryptionKey); dErr != nil {
 			log.Fatalln("Cannot initialize ipcipher. Exiting.")
 		} else {
 			subtle.ConstantTimeCopy(1, encKey[:], decoded)
@@ -57,7 +62,7 @@ func InitEncryption(c *Config) {
 	// generate authentication (HMAC) key from encryption key
 	anonymization.GenerateKeyFromBytesAndCopy(encKey[:], anonymization.AuthenticationKeyLen, authKey[:])
 	// initialize a validator using the configured passphrase; neither length nor salt are used since this validator verifies only the remote code
-	if Validator, err = anonymization.NewKeyValidator(crypto.SHA256, authKey[:], 5 /*length*/, "" /*salt*/, anonymization.NonceNone, false /*withNonce*/, true /*pre-allocated HMAC*/); err != nil {
+	if Validator, err = anonymization.NewKeyValidator(crypto.SHA256, authKey[:], HmacLen /*length*/, "" /*salt*/, anonymization.NonceNone, false /*withNonce*/, true /*pre-allocated HMAC*/); err != nil {
 		log.Fatalln("Cannot initialize validator. Exiting.")
 	}
 	if Ipcipher, err = anonymization.NewCipher(encKey[:]); err != nil {
@@ -108,7 +113,7 @@ func DecryptIp(encrypted string, kvCode string) (decrypted string, err error) {
 	err = nil
 	decrypted = encrypted
 	if err = Validate(kvCode); err != nil {
-		err = fmt.Errorf("wrong validation code for encrypted ip address: %w", err)
+		err = fmt.Errorf("IP address decrypt error: %w", err)
 		return
 	}
 	decrypted = Ipcipher.(*anonymization.Ipcipher).DecryptStr(encrypted)

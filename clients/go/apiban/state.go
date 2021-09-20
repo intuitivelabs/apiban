@@ -35,8 +35,7 @@ func (s *State) SaveToFile() error {
 		return fmt.Errorf("failed to open state file for writing: %w", err)
 	}
 	defer f.Close()
-	json.NewEncoder(f).Encode(s)
-	return nil
+	return json.NewEncoder(f).Encode(s)
 }
 
 func (s *State) LoadFromFile() error {
@@ -45,6 +44,5 @@ func (s *State) LoadFromFile() error {
 		return fmt.Errorf("failed to open state file for reading: %w", err)
 	}
 	defer f.Close()
-	json.NewDecoder(f).Decode(s)
-	return nil
+	return json.NewDecoder(f).Decode(s)
 }

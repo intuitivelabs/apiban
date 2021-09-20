@@ -67,8 +67,6 @@ func signalHandler(sig os.Signal) {
 	switch sig {
 	case syscall.SIGINT:
 		fallthrough
-	case syscall.SIGKILL:
-		fallthrough
 	case syscall.SIGTERM:
 		if err := apiban.GetState().SaveToFile(); err != nil {
 			log.Println(err)
@@ -81,11 +79,14 @@ func signalHandler(sig os.Signal) {
 
 func installSignalHandler() chan os.Signal {
 	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGINT, syscall.SIGKILL, syscall.SIGTERM)
+	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
 	return c
 }
 
 func main() {
+	var (
+		err error
+	)
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -99,8 +100,7 @@ func main() {
 
 	sigChan := installSignalHandler()
 
-	log.Print("** Started APIBAN IPSETS CLIENT")
-	log.Print("Licensed under GPLv2. See LICENSE for details.")
+	log.Print("** client start")
 
 	// Open our config file
 	apiconfig, err := apiban.LoadConfig()
@@ -113,7 +113,6 @@ func main() {
 		lf, err := os.OpenFile(apiconfig.LogFilename,
 			os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
-			//log.Panic(err)
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(-1)
 		}
@@ -125,9 +124,9 @@ func main() {
 	if err := apiban.FixConfig(apiconfig); err != nil {
 		log.Fatalln(err)
 	}
-	log.Print("Chain:", apiconfig.Chain)
+	log.Print("target chain:", apiconfig.TgtChain)
 
-	log.Print("Interval for checking the list:", apiconfig.Tick)
+	log.Print("time interval for checking the list:", apiconfig.Tick)
 
 	if apiconfig.StateFilename != "" {
 		apiban.GetState().Init(apiconfig.StateFilename)
@@ -140,11 +139,14 @@ func main() {
 
 	apiban.InitEncryption(apiconfig)
 
-	fmt.Println("Creating ipset...")
-	iptables, err := apiban.InitializeIPTables(apiconfig.Chain, "blacklist", "whitelist", false /*dry-run?*/)
+	//TODO debug
+	//fmt.Println("Initializing firewall...")
+	if _, err := apiban.InitializeFirewall("blacklist", "whitelist", apiconfig.DryRun, apiconfig.AddBaseObj); err != nil {
+		log.Fatalln("failed to initialize firewall: ", err)
+	}
 
-	if err != nil {
-		log.Fatalln("failed to initialize iptables and ipsets: ", err)
+	if apiconfig.DryRun {
+		return
 	}
 
 	//if iptinit == "chain created" {
@@ -164,16 +166,17 @@ func main() {
 	//	fmt.Print("Error", err)
 	//}
 	//fmt.Print("Content", content)
-	bannedApi := apiban.NewBannedApi(apiconfig.Lkid, apiconfig.Url, apiconfig.Token)
-	allowedApi := apiban.NewAllowedApi(apiconfig.Lkid, apiconfig.Url, apiconfig.Token)
+	apiban.RegisterIpApis(apiconfig.Lkid, apiconfig.Url, apiconfig.Token)
+	apiban.RegisterUriApis(apiconfig.Lkid, apiconfig.Url, apiconfig.Token)
+
 	fmt.Println("going to run in a looop")
-	if err := run(ctx, *iptables, *apiconfig, bannedApi, allowedApi, sigChan); err != nil {
+	if err := run(ctx, *apiconfig, sigChan); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 	}
 	wg.Wait()
 }
 
-func run(ctx context.Context, ipt apiban.IPTables, apiconfig apiban.Config, banned *apiban.Api, allowed *apiban.Api, sigChan chan os.Signal) error {
+func run(ctx context.Context, apiconfig apiban.Config, sigChan chan os.Signal) error {
 	var err error
 	var cnt int
 	// use the last timestamp saved in the state file (if non zero)
@@ -183,10 +186,10 @@ func run(ctx context.Context, ipt apiban.IPTables, apiconfig apiban.Config, bann
 	interval := apiconfig.Tick
 
 	// start right away
-	currentTimeout := time.Duration(1 * time.Nanosecond)
+	currentTimeout := 1 * time.Nanosecond
 	for ticker := time.NewTicker(currentTimeout); ; {
-		t := time.Time(time.Now())
-		log.Println("ticker: ", t)
+		t := time.Now()
+		fmt.Println("ticker: ", t)
 		select {
 		/*
 			case <-ctx.Done():
@@ -198,14 +201,12 @@ func run(ctx context.Context, ipt apiban.IPTables, apiconfig apiban.Config, bann
 		case t = <-ticker.C:
 			cnt++
 			// change the timeout to the one in the configuration
-			log.Println("ticker:", t)
-			err = banned.Process()
-			if err != nil {
-				log.Printf("failed to update blacklist: %s", err)
-			}
-			err = allowed.Process()
-			if err != nil {
-				log.Printf("failed to update whitelist: %s", err)
+			fmt.Println("ticker:", t)
+			for _, api := range apiban.Apis {
+				err = api.Process()
+				if err != nil {
+					log.Printf(`failed to process API "%s": %s`, api.Name, err)
+				}
 			}
 		}
 		newTimeout := interval
