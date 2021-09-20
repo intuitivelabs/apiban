@@ -15,7 +15,7 @@ jobs:
          - name: Install golangci-lint
            run: |
               mkdir -p $HOME/bin
-              curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | bash -s -- -b $HOME/bin v1.23.8
+              curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | bash -s -- -b $HOME/bin
          - name: Go Lint
            run: |
               cd clients/go
