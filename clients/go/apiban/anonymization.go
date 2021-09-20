@@ -26,6 +26,10 @@ var (
 	Validator anonymization.Validator = nil
 )
 
+const (
+	HmacLen = 5
+)
+
 func InitEncryption(c *Config) {
 	var (
 		err     error
@@ -49,7 +53,7 @@ func InitEncryption(c *Config) {
 	} else if len(c.EncryptionKey) > 0 {
 		// use the configured encryption key
 		// copy the configured key into the one used during realtime processing
-		if decoded, err := hex.DecodeString(c.EncryptionKey); err != nil {
+		if decoded, dErr := hex.DecodeString(c.EncryptionKey); dErr != nil {
 			log.Fatalln("Cannot initialize ipcipher. Exiting.")
 		} else {
 			subtle.ConstantTimeCopy(1, encKey[:], decoded)
@@ -58,7 +62,7 @@ func InitEncryption(c *Config) {
 	// generate authentication (HMAC) key from encryption key
 	anonymization.GenerateKeyFromBytesAndCopy(encKey[:], anonymization.AuthenticationKeyLen, authKey[:])
 	// initialize a validator using the configured passphrase; neither length nor salt are used since this validator verifies only the remote code
-	if Validator, err = anonymization.NewKeyValidator(crypto.SHA256, authKey[:], 5 /*length*/, "" /*salt*/, anonymization.NonceNone, false /*withNonce*/, true /*pre-allocated HMAC*/); err != nil {
+	if Validator, err = anonymization.NewKeyValidator(crypto.SHA256, authKey[:], HmacLen /*length*/, "" /*salt*/, anonymization.NonceNone, false /*withNonce*/, true /*pre-allocated HMAC*/); err != nil {
 		log.Fatalln("Cannot initialize validator. Exiting.")
 	}
 	if Ipcipher, err = anonymization.NewCipher(encKey[:]); err != nil {

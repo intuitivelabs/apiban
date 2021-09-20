@@ -140,9 +140,7 @@ func LoadConfig() (*Config, error) {
 
 		// Add standard static locations
 		filenames = append(filenames, defaultConfigFilenames[:]...)
-
 		for _, loc := range filenames {
-
 			err := flags.IniParse(loc, cfg)
 			if err != nil {
 				if _, ok := err.(*os.PathError); ok {
@@ -183,7 +181,6 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return cfg, nil
-
 }
 
 func FixConfig(apiconfig *Config) error {

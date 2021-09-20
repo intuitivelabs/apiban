@@ -122,7 +122,7 @@ func TestApi(t *testing.T) {
 	}
 	InitEncryption(&config)
 	RegisterIpApis("", "", "")
-	if _, err := InitializeFirewall("blacklist", "whitelist", config.DryRun, true); err != nil {
+	if _, err = InitializeFirewall("blacklist", "whitelist", config.DryRun, true); err != nil {
 		t.Fatalf("failed to initialize firewall: %s", err)
 	}
 	t.Run("ipblack parse", func(t *testing.T) {
@@ -135,9 +135,9 @@ func TestApi(t *testing.T) {
 		}
 	})
 	t.Run("ipblack process", func(t *testing.T) {
-		cnt, err := response.(*JSONResponse).processElements(1, Apis[IpBanned])
-		if err != nil {
-			t.Fatalf("failed to process response \n%s\nerror: %s", string(jsonIp), err)
+		cnt, rErr := response.(*JSONResponse).processElements(1, Apis[IpBanned])
+		if rErr != nil {
+			t.Fatalf("failed to process response \n%s\nerror: %s", string(jsonIp), rErr)
 		}
 		if cnt != 1 {
 			t.Fatalf("failed to process response elements")
@@ -153,8 +153,8 @@ func TestApi(t *testing.T) {
 		}
 	})
 	t.Run("ipwhite process", func(t *testing.T) {
-		cnt, err := response.(*JSONResponse).processElements(1, Apis[IpAllowed])
-		if err != nil {
+		cnt, rErr := response.(*JSONResponse).processElements(1, Apis[IpAllowed])
+		if rErr != nil {
 			t.Fatalf("failed to process response \n%s\nerror: %s", string(jsonIp), err)
 		}
 		if cnt != 1 {

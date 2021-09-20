@@ -67,8 +67,6 @@ func signalHandler(sig os.Signal) {
 	switch sig {
 	case syscall.SIGINT:
 		fallthrough
-	case syscall.SIGKILL:
-		fallthrough
 	case syscall.SIGTERM:
 		if err := apiban.GetState().SaveToFile(); err != nil {
 			log.Println(err)
@@ -81,7 +79,7 @@ func signalHandler(sig os.Signal) {
 
 func installSignalHandler() chan os.Signal {
 	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGINT, syscall.SIGKILL, syscall.SIGTERM)
+	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
 	return c
 }
 
@@ -188,9 +186,9 @@ func run(ctx context.Context, apiconfig apiban.Config, sigChan chan os.Signal) e
 	interval := apiconfig.Tick
 
 	// start right away
-	currentTimeout := time.Duration(1 * time.Nanosecond)
+	currentTimeout := 1 * time.Nanosecond
 	for ticker := time.NewTicker(currentTimeout); ; {
-		t := time.Time(time.Now())
+		t := time.Now()
 		fmt.Println("ticker: ", t)
 		select {
 		/*

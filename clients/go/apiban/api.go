@@ -118,7 +118,7 @@ var (
 
 // init the members of Api data structure
 func (api *Api) init(name, configId, baseUrl, path, token string, code APICode) {
-	for k, _ := range api.Values {
+	for k := range api.Values {
 		delete(api.Values, k)
 	}
 	api.Name = name
@@ -167,7 +167,6 @@ func (api *Api) RequestWithQueryValues() (Response, error) {
 		return nil, err
 	}
 	return response, nil
-
 }
 
 // Response processes the answer received from the API server
@@ -224,7 +223,6 @@ func (api Api) parseResponse(msg []byte) (Response, error) {
 	}
 
 	return nil, fmt.Errorf("%s: %w", ErrJsonParser.Error(), err)
-
 }
 
 func (api Api) Get(url string) ([]byte, error) {

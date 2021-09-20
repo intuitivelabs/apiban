@@ -18,7 +18,7 @@ var (
 	ErrAddBaseChainRule   = "adding base chain rule failed: %w"
 	ErrAddSet             = `adding set "%s" failed: %w`
 	ErrAddSetElements     = `adding elements to set failed: %w`
-	ErrCommitSetElements  = `commiting elements to set "%s": %w`
+	ErrCommitSetElements  = `committing elements to set "%s": %w`
 	ErrAddChain           = `adding chain "%s" to table "%s" failed: %w`
 	ErrAddTable           = `adding table "%s" failed: %w`
 	ErrDelRule            = `deleting rule with handle %d from table "%s" chain "%s" failed: %w`
@@ -57,21 +57,28 @@ func (elements SetElements) addIps(ips []string, timeout time.Duration) int {
 	return i
 }
 
-// set indeces
+// set indices
 type SetIdx int
 
-// indeces for nftables sets
+// indices for nftables sets
 const (
 	BlSet SetIdx = iota
 	WlSet
 )
 
-// indeces for nftables rules
+// indices for nftables rules
 const (
 	FwdRuleIdx = iota
 	InRuleIdx
 	WlRuleIdx
 	BlRuleIdx
+)
+
+// IP header constants
+const (
+	IpAddrLen    = 4
+	IpOffSrcAddr = 12
+	IpOffDstAddr = 16
 )
 
 type NFTables struct {
@@ -115,17 +122,17 @@ var nfTables = &NFTables{}
 /* The following functions implement conversion to string for nft objects and commands */
 func exprToString(exprs []expr.Any) (s string) {
 	for _, e := range exprs {
-		switch e.(type) {
+		switch e := e.(type) {
 		case *expr.Counter:
-			s += fmt.Sprintf("counter ")
+			s += "counter "
 		case *expr.Verdict:
-			s += fmt.Sprintf("%s ", verdictToString(e.(*expr.Verdict)))
+			s += fmt.Sprintf("%s ", verdictToString(e))
 		case *expr.Payload:
-			s += fmt.Sprintf("%s ", payloadToString(e.(*expr.Payload)))
+			s += fmt.Sprintf("%s ", payloadToString(e))
 		case *expr.Lookup:
-			s += fmt.Sprintf("%s ", lookupToString(e.(*expr.Lookup)))
+			s += fmt.Sprintf("%s ", lookupToString(e))
 		default:
-			s += fmt.Sprintf("UNKNOWN ")
+			s += "UNKNOWN "
 		}
 	}
 	return
@@ -150,7 +157,7 @@ func verdictToString(v *expr.Verdict) string {
 	case expr.VerdictQueue:
 		return "queue"
 	default:
-		return "UNKONWN"
+		return "UNKNOWN"
 	}
 }
 
@@ -161,12 +168,12 @@ func payloadToString(p *expr.Payload) string {
 		base = "@ll"
 	case expr.PayloadBaseNetworkHeader:
 		base = "@nh"
-		if p.Len == 4 {
+		if p.Len == IpAddrLen {
 			switch p.Offset {
-			case 12:
-				return fmt.Sprintf("ip saddr")
-			case 16:
-				return fmt.Sprintf("ip daddr")
+			case IpOffSrcAddr:
+				return "ip saddr"
+			case IpOffDstAddr:
+				return "ip daddr"
 			}
 		}
 	case expr.PayloadBaseTransportHeader:
@@ -285,7 +292,6 @@ func addTableToString(t *nftables.Table) string {
 
 //newNFTables initializes an NFTables structure for firewall use.
 func newNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun, addBaseObj bool) *NFTables {
-
 	var (
 		policyDrop   = nftables.ChainPolicyDrop
 		policyAccept = nftables.ChainPolicyAccept
@@ -422,7 +428,6 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun, addBas
 //InitializeNFTables sets up the necesarry rules, chains and sets for firewall usage.
 //When `dryRun` is true this function only logs the necessary `nft` commands for setting up the rules, chains and sets.
 func InitializeNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun, addBaseObj bool) (*NFTables, error) {
-
 	nft := newNFTables(table, fwdChain, inChain, target, bl, wl, dryRun, addBaseObj)
 
 	if addBaseObj {
@@ -512,7 +517,6 @@ func areRulesEql(lhs, rhs *nftables.Rule, cmpHandle bool) bool {
 }
 
 func areChainsEql(lhs, rhs *nftables.Chain) bool {
-
 	if lhs.Type == "" && rhs.Type == "" {
 		return lhs.Table.Name == rhs.Table.Name &&
 			lhs.Name == rhs.Name
@@ -525,7 +529,6 @@ func areChainsEql(lhs, rhs *nftables.Chain) bool {
 		lhs.Policy != nil && rhs.Policy != nil &&
 		((*lhs.Policy == 0 && *rhs.Policy == 0) ||
 			(*lhs.Policy != 0 && *rhs.Policy != 0))
-
 }
 
 func areTablesEql(lhs, rhs *nftables.Table) bool {
@@ -840,15 +843,14 @@ func (nft *NFTables) addRegChainRulesAndFlush() error {
 			if wlFound && blFound {
 				break
 			}
-
 		}
 		if !blFound {
-			if err := nft.pushRuleAndFlush(nft.Rules[BlRuleIdx]); err != nil {
+			if err = nft.pushRuleAndFlush(nft.Rules[BlRuleIdx]); err != nil {
 				return fmt.Errorf("failed to add target chain rule: %w", err)
 			}
 		}
 		if !wlFound {
-			if err := nft.pushRuleAndFlush(nft.Rules[WlRuleIdx]); err != nil {
+			if err = nft.pushRuleAndFlush(nft.Rules[WlRuleIdx]); err != nil {
 				return fmt.Errorf("failed to add target chain rule: %w", err)
 			}
 		}
@@ -858,7 +860,7 @@ func (nft *NFTables) addRegChainRulesAndFlush() error {
 			nft.Commands = fmt.Sprintf("%s%s\n", nft.Commands, addRuleToString(rule))
 		}
 		if !nft.DryRun {
-			if err := nft.Conn.Flush(); err != nil {
+			if err = nft.Conn.Flush(); err != nil {
 				// TODO: rollback
 				return fmt.Errorf(`"%s" table rule add - commit to kernel failed: %w`,
 					nft.Table.Name, err)
@@ -933,10 +935,9 @@ func (nft *NFTables) setAddElements(set *nftables.Set, elements []nftables.SetEl
 		} else {
 			cnt += MaxSetSize
 		}
-
 	}
 	if len(elements) > i*MaxSetSize {
-		if err := nft.setAddElementsAndFlush(set, elements[i*MaxSetSize:len(elements)]); err != nil {
+		if err := nft.setAddElementsAndFlush(set, elements[i*MaxSetSize:]); err != nil {
 			log.Printf(ErrAddSetElements, set.Name, err)
 		} else {
 			cnt += len(elements) - i*MaxSetSize

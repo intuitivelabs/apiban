@@ -43,26 +43,27 @@ func InitializeIPTables(chain, bl, wl string, dryRun bool) (*IPTables, error) {
 		Bl:     bl,
 		Wl:     wl,
 		Sets:   make(map[string]*ipset.IPSet)}
-	ipTables.t, err = iptables.New()
-	if err != nil {
+
+	if ipTables.t, err = iptables.New(); err != nil {
 		log.Panic(err)
 	}
 
 	// create the user-defined chain for the firewall.
 	// check if the chain already exists
-	if ok, err := ipTables.ChainExists(chain); err != nil {
-		return nil, fmt.Errorf(`"%s" table "%s" chain check error: %w`, ipTables.table, chain, err)
-	} else if !ok {
+	ok, iptErr := ipTables.ChainExists(chain)
+	if iptErr != nil {
+		return nil, fmt.Errorf(`"%s" table "%s" chain check error: %w`, ipTables.table, chain, iptErr)
+	}
+	if !ok {
 		// chain does NOT exist; create a new chain
 		log.Printf(`create chain "%s" in table "%s"`, chain, ipTables.table)
-		err = ipTables.ClearChain(chain)
-		if err != nil {
+		if err = ipTables.ClearChain(chain); err != nil {
 			return nil, fmt.Errorf(`"%s" table "%s" chain create error: %w`, ipTables.table, chain, err)
 		}
 	} else {
 		// chain exists; show a warning with all the rules in the chain
-		if rules, err := ipTables.t.List(ipTables.table, chain); err != nil {
-			return nil, fmt.Errorf(`"%s" table "%s" chain list error: %w`, ipTables.table, chain, err)
+		if rules, iptErr := ipTables.t.List(ipTables.table, chain); iptErr != nil {
+			return nil, fmt.Errorf(`"%s" table "%s" chain list error: %w`, ipTables.table, chain, iptErr)
 		} else {
 			log.Printf(
 				`WARNING: chain "%s" already exists in table "%s" chain and has the following rules:
@@ -80,11 +81,11 @@ func InitializeIPTables(chain, bl, wl string, dryRun bool) (*IPTables, error) {
 		return nil, err
 	}
 
-	if err := ipTables.InsertRuleBlacklist(); err != nil {
+	if err = ipTables.InsertRuleBlacklist(); err != nil {
 		return nil, fmt.Errorf(`blacklist rule insert error: %w`, err)
 	}
 
-	if err := ipTables.InsertRuleWhitelist(); err != nil {
+	if err = ipTables.InsertRuleWhitelist(); err != nil {
 		return nil, fmt.Errorf(`whitelist rule insert error: %w`, err)
 	}
 
@@ -223,7 +224,7 @@ func (ipt *IPTables) AddToBlacklist(ips []string, timeout time.Duration) (cnt in
 		}
 		return
 	}
-	return 0, ErrNoBlacklistFound
+	return
 }
 
 func (ipt *IPTables) AddToWhitelist(ips []string, timeout time.Duration) (cnt int, err error) {
