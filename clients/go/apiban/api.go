@@ -13,51 +13,6 @@ import (
 	"time"
 )
 
-// Response should be implemented by all processors for API JSON responses
-type Response interface {
-	Process(*Api) error
-}
-
-type Api struct {
-	Name     string
-	Client   http.Client
-	ConfigId string
-	BaseUrl  string
-	Path     string
-	// timestamp to use for the next request
-	Timestamp string
-	// query parameters are stored here
-	Values       url.Values
-	Code         APICode
-	ResponseProc func(IpVector, time.Duration) (int, error)
-}
-
-var (
-	// API register
-	Apis [4]*Api
-)
-
-// API response JSON objects
-var IPMapKeys = [...]string{"IP", "fromua", "encrypt", "exceeded", "count", "timestamp"}
-var MetadataKeys = [...]string{"defaultBlacklistTtl"}
-
-type JSONMap map[string]interface{}
-
-// API codes
-type APICode int
-
-const (
-	IpBanned APICode = iota
-	IpAllowed
-	UriBanned
-	UriAllowed
-)
-
-// API paths
-const (
-	BwV4List = "bwnoa/v4list"
-)
-
 // errors
 var (
 	// ErrBadRequest indicates a 400 response was received;
@@ -76,6 +31,153 @@ var (
 	ErrJsonEmptyIPAddressField                 = errors.New("malformed JSON response: IP address field is empty")
 )
 
+// Response processing
+// Response should be implemented by all processors for API JSON responses
+type Response interface {
+	Process(*Api) error
+}
+
+// API response JSON objects
+var (
+	IPMapKeys    = [...]string{"IP", "fromua", "encrypt", "exceeded", "count", "timestamp"}
+	MetadataKeys = [...]string{"defaultBlacklistTtl"}
+)
+
+type JSONMap map[string]interface{}
+
+// Resource is a generic term for IP addressses, URIs; this interface should be implemented by all resources
+type Resource interface {
+	// Process locally the resource received from the server (by applying b/w listing, fw rules aso)
+	// Process(ttl time.Duration, api APICode) error
+	Decrypt() (string, error)
+}
+
+// generic response object used for unmarshalling either IP or URI JSON objects
+type Element struct {
+	r Resource
+}
+
+type Elements []*Element
+
+// UnmarshalJSON decodes the element by using trial and error between IP and URI JSON objects
+func (elem *Element) UnmarshalJSON(msg []byte) error {
+	var (
+		ip  IP
+		uri URI
+	)
+	elem.r = nil
+	if string(msg) == "null" {
+		return nil
+	}
+
+	if err := json.Unmarshal(msg, &ip); err == nil {
+		if len(ip.Ipaddr) > 0 {
+			elem.r = &ip
+			return nil
+		}
+	}
+
+	if err := json.Unmarshal(msg, &uri); err == nil {
+		if len(uri.URI) > 0 {
+			elem.r = &uri
+			return nil
+		}
+	}
+
+	return ErrJsonParser
+}
+
+// JSONResponse describes the response for bwnoa/v4list API
+type JSONResponse struct {
+	Metadata JSONMap `json:"metadata"`
+
+	// ID is the timestamp of the next response
+	ID string `json:"ID,omitempty"`
+
+	// an array of resources (either of: IP addr, URI) in this response
+	Elements Elements `json:"elements"`
+}
+
+// ProcResponse processes the response returned by the GET API.
+func (msg *JSONResponse) Process(api *Api) error {
+	if len(msg.Elements) == 0 {
+		log.Print("No new bans to add...")
+		return nil
+	}
+
+	ttl := GetConfig().BlacklistTtl
+	if ttl == 0 {
+		// try to get the ttl from the answers metadata
+		t, _ := msg.Metadata.Ttl()
+		ttl = time.Duration(t) * time.Second
+	}
+
+	// TODO debug
+	//log.Print("ttl: ", ttl)
+	if timestamp, err := msg.Metadata.Timestamp(); err != nil {
+		return err
+	} else {
+		api.Timestamp = strconv.Itoa(timestamp)
+	}
+
+	// process IP objects
+	cnt, err := msg.processElements(ttl, api)
+	if cnt < len(msg.Elements) {
+		log.Printf("processed %d out of %d elements", cnt, len(msg.Elements))
+	}
+	return err
+}
+
+func (msg *JSONResponse) processElements(ttl time.Duration, api *Api) (int, error) {
+	var (
+		i int = 0
+	)
+	if len(msg.Elements) == 0 {
+		return 0, nil
+	}
+	plainTxt := make([]string, len(msg.Elements))
+	for _, el := range msg.Elements {
+		if el == nil {
+			continue
+		}
+		if i > len(plainTxt) {
+			break
+		}
+		if b, err := el.r.Decrypt(); err != nil {
+			fmt.Printf("error decrypting \"%v\": %s\n", el.r, err)
+			continue
+		} else {
+			fmt.Printf("decrypted element: %s\n", b)
+			plainTxt[i] = b
+			i++
+		}
+	}
+	if i < len(plainTxt) {
+		log.Printf("%d out of %d elements were decrypted", i, len(plainTxt))
+	}
+	if i == 0 {
+		return 0, nil
+	}
+	switch api.Code {
+	case IpBanned:
+		return AddToBlacklist(plainTxt[0:i], ttl)
+	case IpAllowed:
+		return AddToWhitelist(plainTxt[0:i], ttl)
+	default:
+		return 0, ErrUnknownApi
+	}
+}
+
+// ErrResponse
+type ErrResponse struct {
+	StatusCode        int    `json:"statusCode"`
+	StatusDescription string `json:"statusDescription"`
+}
+
+func (msg *ErrResponse) Process(api *Api) error {
+	log.Printf(`received an error response for api "%s": %d %s`, api.Path, msg.StatusCode, msg.StatusDescription)
+	return nil
+}
 func (metadata JSONMap) Ttl() (ttl int, err error) {
 	ttl = 0
 	err = nil
@@ -108,12 +210,48 @@ func (metadata JSONMap) Timestamp() (timestamp int, err error) {
 	return
 }
 
+// API generic processing
+type Api struct {
+	Name     string
+	Client   http.Client
+	ConfigId string
+	BaseUrl  string
+	Path     string
+	// timestamp to use for the next request
+	Timestamp string
+	// query parameters are stored here
+	Values       url.Values
+	Code         APICode
+	ResponseProc func(IpVector, time.Duration) (int, error)
+}
+
 var (
+	// client used for all API requests
 	defaultHttpClient = http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 	}
+	// API register
+	Apis [numberOfApis]*Api
+)
+
+// API codes
+type APICode int
+
+const (
+	IpBanned APICode = iota
+	IpAllowed
+	// banned IP addresses published by the public honeynet
+	IpHoneyNet
+	UriBanned
+	UriAllowed
+	numberOfApis
+)
+
+// API paths
+const (
+	BwV4List = "bwnoa/v4list"
 )
 
 // init the members of Api data structure
@@ -245,139 +383,4 @@ func (api Api) Get(url string) ([]byte, error) {
 	}
 
 	return ioutil.ReadAll(response.Body)
-}
-
-// Resource is a generic term for IP addressses, URIs; this interface should be implemented by all resources
-type Resource interface {
-	// Process locally the resource received from the server (by applying b/w listing, fw rules aso)
-	// Process(ttl time.Duration, api APICode) error
-	Decrypt() (string, error)
-}
-
-// generic response object used for unmarshalling either IP or URI JSON objects
-type Element struct {
-	r Resource
-}
-
-type Elements []*Element
-
-// UnmarshalJSON decodes the element by using trial and error between IP and URI JSON objects
-func (elem *Element) UnmarshalJSON(msg []byte) error {
-	var (
-		ip  IP
-		uri URI
-	)
-	elem.r = nil
-	if string(msg) == "null" {
-		return nil
-	}
-
-	if err := json.Unmarshal(msg, &ip); err == nil {
-		if len(ip.Ipaddr) > 0 {
-			elem.r = &ip
-			return nil
-		}
-	}
-
-	if err := json.Unmarshal(msg, &uri); err == nil {
-		if len(uri.URI) > 0 {
-			elem.r = &uri
-			return nil
-		}
-	}
-
-	return ErrJsonParser
-}
-
-// JSONResponse describes the response for bwnoa/v4list API
-type JSONResponse struct {
-	Metadata JSONMap `json:"metadata"`
-
-	// ID is the timestamp of the next response
-	ID string `json:"ID,omitempty"`
-
-	// an array of resources (either of: IP addr, URI) in this response
-	//Elements []*Element `json:"elements"`
-	Elements Elements `json:"elements"`
-}
-
-// ProcResponse processes the response returned by the GET API.
-func (msg *JSONResponse) Process(api *Api) error {
-	if len(msg.Elements) == 0 {
-		log.Print("No new bans to add...")
-		return nil
-	}
-
-	ttl := GetConfig().BlacklistTtl
-	if ttl == 0 {
-		// try to get the ttl from the answers metadata
-		t, _ := msg.Metadata.Ttl()
-		ttl = time.Duration(t) * time.Second
-	}
-
-	// TODO debug
-	//log.Print("ttl: ", ttl)
-	if timestamp, err := msg.Metadata.Timestamp(); err != nil {
-		return err
-	} else {
-		api.Timestamp = strconv.Itoa(timestamp)
-	}
-
-	// process IP objects
-	cnt, err := msg.processElements(ttl, api)
-	if cnt < len(msg.Elements) {
-		log.Printf("processed %d out of %d elements", cnt, len(msg.Elements))
-	}
-	return err
-}
-
-func (msg *JSONResponse) processElements(ttl time.Duration, api *Api) (int, error) {
-	var (
-		i int = 0
-	)
-	if len(msg.Elements) == 0 {
-		return 0, nil
-	}
-	plainTxt := make([]string, len(msg.Elements))
-	for _, el := range msg.Elements {
-		if el == nil {
-			continue
-		}
-		if i > len(plainTxt) {
-			break
-		}
-		if b, err := el.r.Decrypt(); err != nil {
-			fmt.Printf("error decrypting \"%v\": %s\n", el.r, err)
-			continue
-		} else {
-			fmt.Printf("decrypted element: %s\n", b)
-			plainTxt[i] = b
-			i++
-		}
-	}
-	if i < len(plainTxt) {
-		log.Printf("%d out of %d elements were decrypted", i, len(plainTxt))
-	}
-	if i == 0 {
-		return 0, nil
-	}
-	switch api.Code {
-	case IpBanned:
-		return AddToBlacklist(plainTxt[0:i], ttl)
-	case IpAllowed:
-		return AddToWhitelist(plainTxt[0:i], ttl)
-	default:
-		return 0, ErrUnknownApi
-	}
-}
-
-// ErrResponse
-type ErrResponse struct {
-	StatusCode        int    `json:"statusCode"`
-	StatusDescription string `json:"statusDescription"`
-}
-
-func (msg *ErrResponse) Process(api *Api) error {
-	log.Printf(`received an error response for api "%s": %d %s`, api.Path, msg.StatusCode, msg.StatusDescription)
-	return nil
 }
