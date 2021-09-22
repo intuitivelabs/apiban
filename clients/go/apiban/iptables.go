@@ -5,6 +5,7 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/vladabroz/go-ipset/ipset"
 	"log"
+	"net"
 	"strings"
 	"time"
 )
@@ -18,6 +19,8 @@ type IPTables struct {
 	chain string
 	// name of the ipset set of addresses for blacklisting
 	Bl string
+	// name of the ipset set of addresses for public (honeynet) blacklisting
+	PublicBl string
 	// name of the ipset set of addresses for whitelisting
 	Wl string
 
@@ -33,16 +36,17 @@ type IPTables struct {
 
 var ipTables = &IPTables{}
 
-func InitializeIPTables(chain, bl, wl string, dryRun bool) (*IPTables, error) {
+func InitializeIPTables(chain, publicBl, bl, wl string, dryRun bool) (*IPTables, error) {
 	var err error
 
 	*ipTables = IPTables{
-		dryRun: dryRun,
-		table:  "filter",
-		chain:  chain,
-		Bl:     bl,
-		Wl:     wl,
-		Sets:   make(map[string]*ipset.IPSet)}
+		dryRun:   dryRun,
+		table:    "filter",
+		chain:    chain,
+		PublicBl: publicBl,
+		Bl:       bl,
+		Wl:       wl,
+		Sets:     make(map[string]*ipset.IPSet)}
 
 	if ipTables.t, err = iptables.New(); err != nil {
 		log.Panic(err)
@@ -83,6 +87,10 @@ func InitializeIPTables(chain, bl, wl string, dryRun bool) (*IPTables, error) {
 
 	if err = ipTables.InsertRuleBlacklist(); err != nil {
 		return nil, fmt.Errorf(`blacklist rule insert error: %w`, err)
+	}
+
+	if err = ipTables.InsertRulePublicBlacklist(); err != nil {
+		return nil, fmt.Errorf(`public blacklist rule insert error: %w`, err)
 	}
 
 	if err = ipTables.InsertRuleWhitelist(); err != nil {
@@ -203,6 +211,10 @@ func (ipt *IPTables) InsertRuleBlacklist() (err error) {
 	return ipt.InsertIpsetRule(ipt.table, ipt.chain, ipt.Bl, false)
 }
 
+func (ipt *IPTables) InsertRulePublicBlacklist() (err error) {
+	return ipt.InsertIpsetRule(ipt.table, ipt.chain, ipt.PublicBl, false)
+}
+
 func (ipt *IPTables) InsertRuleWhitelist() (err error) {
 	return ipt.InsertIpsetRule(ipt.table, ipt.chain, ipt.Wl, true)
 }
@@ -225,6 +237,10 @@ func (ipt *IPTables) AddToBlacklist(ips []string, timeout time.Duration) (cnt in
 		return
 	}
 	return
+}
+
+func (ipt *IPTables) AddToPublicBlacklistBin(ips []net.IP, timeout time.Duration) (cnt int, err error) {
+	return 0, nil
 }
 
 func (ipt *IPTables) AddToWhitelist(ips []string, timeout time.Duration) (cnt int, err error) {

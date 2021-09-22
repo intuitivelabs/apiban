@@ -111,6 +111,63 @@ func TestApi(t *testing.T) {
 	}
   ]
 }`)
+	jsonHoneynet := []byte(
+		`{
+  "metadata": {
+    "Generatedat": 1632346214,
+    "Generatedby": "IntuitiveLabs",
+    "Count": 1024,
+    "ScannedCount": 1024,
+    "ApiParameters": {
+      "list": "ipblack",
+      "Limit": "1024",
+      "honeynet": true,
+      "timestamp": 0,
+      "token": "WCjXItbwBUe89h18hxpeWk7MheWHNxRA0ZxdnmzOKAy4kIaczLiPCtS4AKXBGNfY"
+    },
+    "dynamoParams": {
+      "ExpressionAttributeValues": {
+        ":start_ts": 0,
+        ":div": "869cc762-7a2a-4957-b04d-5774dee4fafa#ipblack"
+      },
+      "ExpressionAttributeNames": {
+        "#ts": "timestamp",
+        "#did": "domain"
+      },
+      "KeyConditionExpression": "#did = :div AND #ts > :start_ts",
+      "Limit": "1024",
+      "TableName": "jksep09data-IPBlacklist-42PA4LJUCFOA",
+      "IndexName": "jksep09data-ipblacklistgsi"
+    },
+    "endnote": "Count 1024 >= Limit 1024",
+    "firstKey": {
+      "IP": "plain#35.156.85.75",
+      "domain": "869cc762-7a2a-4957-b04d-5774dee4fafa#ipblack",
+      "timestamp": 1605002872
+    },
+    "firstEncodedKey": "eyJJUCI6InBsYWluIzM1LjE1Ni44NS43NSIsImRvbWFpbiI6Ijg2OWNjNzYyLTdhMmEtNDk1Ny1iMDRkLTU3NzRkZWU0ZmFmYSNpcGJsYWNrIiwidGltZXN0YW1wIjoxNjA1MDAyODcyfQ==",
+    "nextKey": {
+      "IP": "plain#74.207.253.197",
+      "domain": "869cc762-7a2a-4957-b04d-5774dee4fafa#ipblack",
+      "timestamp": 1609718068
+    },
+    "nextEncodedKey": "eyJJUCI6InBsYWluIzc0LjIwNy4yNTMuMTk3IiwiZG9tYWluIjoiODY5Y2M3NjItN2EyYS00OTU3LWIwNGQtNTc3NGRlZTRmYWZhI2lwYmxhY2siLCJ0aW1lc3RhbXAiOjE2MDk3MTgwNjh9",
+    "defaultBlacklistTtl": 172800,
+    "lastTimestamp": 1609718068
+  },
+  "elements": [
+    {
+      "encrypt": "plain:294ddd10-75e3-4443-8c91-683abb4a3f20",
+      "count": 1,
+      "ipaddr": "35.156.85.75",
+      "foo": 1,
+      "timestamp": 1605002872,
+      "IP": "plain#35.156.85.75",
+      "reason": "authfail_ip",
+      "domain": "869cc762-7a2a-4957-b04d-5774dee4fafa#ipblack"
+    }
+   ]
+}`)
 	config = Config{
 		Passphrase:  "reallyworks?",
 		Table:       "filter",
@@ -122,7 +179,7 @@ func TestApi(t *testing.T) {
 	}
 	InitEncryption(&config)
 	RegisterIpApis("", "", "")
-	if _, err = InitializeFirewall("blacklist", "whitelist", config.DryRun, true); err != nil {
+	if _, err = InitializeFirewall("honeynet", "blacklist", "whitelist", config.DryRun, true); err != nil {
 		t.Fatalf("failed to initialize firewall: %s", err)
 	}
 	t.Run("ipblack parse", func(t *testing.T) {
@@ -155,7 +212,25 @@ func TestApi(t *testing.T) {
 	t.Run("ipwhite process", func(t *testing.T) {
 		cnt, rErr := response.(*JSONResponse).processElements(1, Apis[IpAllowed])
 		if rErr != nil {
-			t.Fatalf("failed to process response \n%s\nerror: %s", string(jsonIp), err)
+			t.Fatalf("failed to process response \n%s\nerror: %s", string(jsonIp), rErr)
+		}
+		if cnt != 1 {
+			t.Fatalf("failed to process response elements")
+		}
+	})
+	t.Run("honeynet parse", func(t *testing.T) {
+		response, err = Apis[IpHoneynet].parseResponse(jsonHoneynet)
+		if err != nil {
+			t.Fatalf("parse response %s error: %s ", string(jsonIp), err)
+		}
+		if response.(*JSONResponse) == nil {
+			t.Fatalf("invalid response type")
+		}
+	})
+	t.Run("honeynet process", func(t *testing.T) {
+		cnt, rErr := response.(*JSONResponse).processElements(1, Apis[IpHoneynet])
+		if rErr != nil {
+			t.Fatalf("failed to process response \n%s\nerror: %s", string(jsonIp), rErr)
 		}
 		if cnt != 1 {
 			t.Fatalf("failed to process response elements")
