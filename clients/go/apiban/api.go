@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -98,7 +99,7 @@ type JSONResponse struct {
 	Elements Elements `json:"elements"`
 }
 
-// ProcResponse processes the response returned by the GET API.
+// Process processes the response returned by the GET API.
 func (msg *JSONResponse) Process(api *Api) error {
 	if len(msg.Elements) == 0 {
 		log.Print("No new bans to add...")
@@ -128,44 +129,118 @@ func (msg *JSONResponse) Process(api *Api) error {
 	return err
 }
 
-func (msg *JSONResponse) processElements(ttl time.Duration, api *Api) (int, error) {
+func (msg *JSONResponse) decryptElements(pos int, dst []string) (decrypted int, processed int) {
 	var (
-		i int = 0
+		errCnt = 0
+		el     *Element
 	)
-	if len(msg.Elements) == 0 {
-		return 0, nil
+	if pos >= len(msg.Elements) {
+		return 0, 0
 	}
-	plainTxt := make([]string, len(msg.Elements))
-	for _, el := range msg.Elements {
+	for processed, el = range msg.Elements[pos:] {
 		if el == nil {
 			continue
 		}
-		if i > len(plainTxt) {
+		if decrypted > len(dst) {
 			break
 		}
 		if b, err := el.r.Decrypt(); err != nil {
-			fmt.Printf("error decrypting \"%v\": %s\n", el.r, err)
+			// TODO debug
+			//fmt.Printf("error decrypting \"%v\": %s\n", el.r, err)
+			errCnt++
 			continue
 		} else {
-			fmt.Printf("decrypted element: %s\n", b)
-			plainTxt[i] = b
-			i++
+			// TODO debug
+			// fmt.Printf("decrypted element: %s\n", b)
+			dst[decrypted] = b
+			decrypted++
 		}
 	}
-	if i < len(plainTxt) {
-		log.Printf("%d out of %d elements were decrypted", i, len(plainTxt))
+	if decrypted < len(dst) {
+		log.Printf("%d out of %d elements were decrypted", decrypted, len(dst))
 	}
-	if i == 0 {
+	if errCnt > 0 {
+		log.Printf("%d decryption errors", errCnt)
+	}
+	return
+}
+
+func (msg *JSONResponse) parseIpElements(pos int, dst []net.IP) (parsed int, processed int) {
+	var (
+		errCnt = 0
+		el     *Element
+	)
+	if pos >= len(msg.Elements) {
+		return 0, 0
+	}
+	for processed, el = range msg.Elements {
+		if el == nil {
+			continue
+		}
+		if parsed > len(dst) {
+			break
+		}
+		ip, ok := el.r.(*IP)
+		if !ok {
+			// TODO debug
+			//fmt.Printf("error decrypting \"%v\": %s\n", el.r, err)
+			errCnt++
+			continue
+		}
+		if b, err := ip.Parse(); err != nil {
+			// TODO debug
+			//fmt.Printf("error decrypting \"%v\": %s\n", el.r, err)
+			errCnt++
+			continue
+		} else {
+			// TODO debug
+			// fmt.Printf("decrypted element: %s\n", b)
+			dst[parsed] = b
+			parsed++
+		}
+	}
+	if parsed < len(dst) {
+		log.Printf("%d out of %d elements were parsed", parsed, len(dst))
+	}
+	if errCnt > 0 {
+		log.Printf("%d parse errors", errCnt)
+	}
+	return
+}
+
+func (msg *JSONResponse) processElements(ttl time.Duration, api *Api) (int, error) {
+	if len(msg.Elements) == 0 {
 		return 0, nil
 	}
 	switch api.Code {
 	case IpBanned:
-		return AddToBlacklist(plainTxt[0:i], ttl)
+		return msg.processIpBanned(ttl)
 	case IpAllowed:
-		return AddToWhitelist(plainTxt[0:i], ttl)
+		return msg.processIpAllowed(ttl)
+	case IpHoneynet:
+		return msg.processIpHoneynet(ttl)
 	default:
 		return 0, ErrUnknownApi
 	}
+}
+
+// specific response processing function per API code
+func (msg *JSONResponse) processIpBanned(ttl time.Duration) (int, error) {
+	ips := make([]string, len(msg.Elements))
+	msg.decryptElements(0, ips)
+	return AddToBlacklist(ips, ttl)
+}
+
+func (msg *JSONResponse) processIpAllowed(ttl time.Duration) (int, error) {
+	ips := make([]string, len(msg.Elements))
+	msg.decryptElements(0, ips)
+	return AddToWhitelist(ips, ttl)
+}
+
+func (msg *JSONResponse) processIpHoneynet(ttl time.Duration) (int, error) {
+	ips := make([]net.IP, len(msg.Elements))
+	msg.parseIpElements(0, ips)
+	return AddToPublicBlacklist(ips, ttl)
 }
 
 // ErrResponse
@@ -220,9 +295,8 @@ type Api struct {
 	// timestamp to use for the next request
 	Timestamp string
 	// query parameters are stored here
-	Values       url.Values
-	Code         APICode
-	ResponseProc func(IpVector, time.Duration) (int, error)
+	Values url.Values
+	Code   APICode
 }
 
 var (
@@ -243,7 +317,7 @@ const (
 	IpBanned APICode = iota
 	IpAllowed
 	// banned IP addresses published by the public honeynet
-	IpHoneyNet
+	IpHoneynet
 	UriBanned
 	UriAllowed
 	numberOfApis

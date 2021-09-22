@@ -29,9 +29,9 @@ var (
 // define a new type and implement a method which is used for adding IP addresses into a SetElement
 type SetElements []nftables.SetElement
 
-//addIps parses IP address from the input string slice and inserts them into the elements
+//addStrIps parses IP address from the input string slice and inserts them into the elements
 //It returns the number of IP addresses inserted into the elements
-func (elements SetElements) addIps(ips []string, timeout time.Duration) int {
+func (elements SetElements) addStrIps(ips []string, timeout time.Duration) int {
 	var (
 		i  int = 0
 		ip string
@@ -57,13 +57,40 @@ func (elements SetElements) addIps(ips []string, timeout time.Duration) int {
 	return i
 }
 
+//addBinIps inserts the IP addresses from the input slice into the elements
+//It returns the number of IP addresses inserted into the elements
+func (elements SetElements) addBinIps(ips []net.IP, timeout time.Duration) int {
+	var (
+		i  int = 0
+		ip net.IP
+	)
+	for _, ip = range ips {
+		if len(ip) == 0 {
+			continue
+		}
+		if i == len(elements) {
+			break
+		}
+		elements[i] = nftables.SetElement{
+			Key:     ip,
+			Timeout: timeout,
+		}
+		i++
+	}
+
+	return i
+}
+
 // set indices
 type SetIdx int
 
 // indices for nftables sets
 const (
 	BlSet SetIdx = iota
+	PublicBlSet
 	WlSet
+	// always last one
+	numberOfSets
 )
 
 // indices for nftables rules
@@ -72,13 +99,16 @@ const (
 	InRuleIdx
 	WlRuleIdx
 	BlRuleIdx
+	PublicBlRuleIdx
+	// always last one
+	numberOfRules
 )
 
 // IP header constants
 const (
 	IpAddrLen    = 4
-	IpOffSrcAddr = 12
-	IpOffDstAddr = 16
+	IpSrcAddrOff = 12
+	IpAddrOffDst = 16
 )
 
 type NFTables struct {
@@ -103,15 +133,10 @@ type NFTables struct {
 	RegChain *nftables.Chain
 
 	// sets
-	Sets [2]*nftables.Set
-
-	// expressions used in rules
-	JmpTargetExpr []expr.Any
-	DropBlExpr    []expr.Any
-	AcceptWlExpr  []expr.Any
+	Sets [numberOfSets]*nftables.Set
 
 	// rules
-	Rules [4]*nftables.Rule
+	Rules [numberOfRules]*nftables.Rule
 
 	// connection to netlink sockets
 	Conn *nftables.Conn
@@ -170,9 +195,9 @@ func payloadToString(p *expr.Payload) string {
 		base = "@nh"
 		if p.Len == IpAddrLen {
 			switch p.Offset {
-			case IpOffSrcAddr:
+			case IpSrcAddrOff:
 				return "ip saddr"
-			case IpOffDstAddr:
+			case IpAddrOffDst:
 				return "ip daddr"
 			}
 		}
@@ -291,7 +316,7 @@ func addTableToString(t *nftables.Table) string {
 }
 
 //newNFTables initializes an NFTables structure for firewall use.
-func newNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun, addBaseObj bool) *NFTables {
+func newNFTables(table, fwdChain, inChain, target, publicBl, bl, wl string, dryRun, addBaseObj bool) *NFTables {
 	var (
 		policyDrop   = nftables.ChainPolicyDrop
 		policyAccept = nftables.ChainPolicyAccept
@@ -341,6 +366,12 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun, addBas
 		HasTimeout: true,
 		KeyType:    nftables.TypeIPAddr,
 	}
+	nfTables.Sets[PublicBlSet] = &nftables.Set{
+		Table:      nfTables.Table,
+		Name:       publicBl,
+		HasTimeout: true,
+		KeyType:    nftables.TypeIPAddr,
+	}
 	nfTables.Sets[WlSet] = &nftables.Set{
 		Table:      nfTables.Table,
 		Name:       wl,
@@ -350,22 +381,24 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun, addBas
 
 	// initialize expressions
 	// expression for jumping to the chain target
-	nfTables.JmpTargetExpr = []expr.Any{
+	jmpTargetExpr := []expr.Any{
 		&expr.Counter{},
 		&expr.Verdict{
 			Kind:  expr.VerdictJump,
 			Chain: target,
 		},
 	}
+	// expressions for dropping/accepting traffic on set match
+	payloadIpSrc := expr.Payload{
+		// payload load 4b @ network header + 12 => reg 1
+		DestRegister: 1,
+		Base:         expr.PayloadBaseNetworkHeader,
+		Offset:       IpSrcAddrOff,
+		Len:          IpAddrLen,
+	}
 	// expression for dropping the blacklisted addresses
-	nfTables.DropBlExpr = []expr.Any{
-		&expr.Payload{
-			// payload load 4b @ network header + 12 => reg 1
-			DestRegister: 1,
-			Base:         expr.PayloadBaseNetworkHeader,
-			Offset:       12,
-			Len:          4,
-		},
+	dropBlExpr := []expr.Any{
+		&payloadIpSrc,
 		&expr.Lookup{
 			SourceRegister: 1,
 			SetName:        nfTables.Sets[BlSet].Name,
@@ -376,15 +409,22 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun, addBas
 			Kind: expr.VerdictDrop,
 		},
 	}
-	// expression for accepting the whitelisted addresses
-	nfTables.AcceptWlExpr = []expr.Any{
-		&expr.Payload{
-			// payload load 4b @ network header + 12 => reg 1
-			DestRegister: 1,
-			Base:         expr.PayloadBaseNetworkHeader,
-			Offset:       12,
-			Len:          4,
+	// expression for dropping the public (honeynet) blacklisted addresses
+	dropPublicBlExpr := []expr.Any{
+		&payloadIpSrc,
+		&expr.Lookup{
+			SourceRegister: 1,
+			SetName:        nfTables.Sets[PublicBlSet].Name,
+			SetID:          nfTables.Sets[PublicBlSet].ID,
 		},
+		&expr.Counter{},
+		&expr.Verdict{
+			Kind: expr.VerdictDrop,
+		},
+	}
+	// expression for accepting the whitelisted addresses
+	acceptWlExpr := []expr.Any{
+		&payloadIpSrc,
 		&expr.Lookup{
 			SourceRegister: 1,
 			SetName:        nfTables.Sets[WlSet].Name,
@@ -401,25 +441,31 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun, addBas
 	nfTables.Rules[FwdRuleIdx] = &nftables.Rule{
 		Table: nfTables.Table,
 		Chain: nfTables.FwdChain,
-		Exprs: nfTables.JmpTargetExpr,
+		Exprs: jmpTargetExpr,
 	}
 	// rule used for jumping from input chain to the target chain
 	nfTables.Rules[InRuleIdx] = &nftables.Rule{
 		Table: nfTables.Table,
 		Chain: nfTables.InChain,
-		Exprs: nfTables.JmpTargetExpr,
+		Exprs: jmpTargetExpr,
 	}
 	// rule used for accepting packets with saddr matching wl set
 	nfTables.Rules[WlRuleIdx] = &nftables.Rule{
 		Table: nfTables.Table,
 		Chain: nfTables.RegChain,
-		Exprs: nfTables.AcceptWlExpr,
+		Exprs: acceptWlExpr,
 	}
 	// rule used for dropping packets with saddr matching bl set
 	nfTables.Rules[BlRuleIdx] = &nftables.Rule{
 		Table: nfTables.Table,
 		Chain: nfTables.RegChain,
-		Exprs: nfTables.DropBlExpr,
+		Exprs: dropBlExpr,
+	}
+
+	nfTables.Rules[PublicBlRuleIdx] = &nftables.Rule{
+		Table: nfTables.Table,
+		Chain: nfTables.RegChain,
+		Exprs: dropPublicBlExpr,
 	}
 
 	return nfTables
@@ -427,8 +473,8 @@ func newNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun, addBas
 
 //InitializeNFTables sets up the necesarry rules, chains and sets for firewall usage.
 //When `dryRun` is true this function only logs the necessary `nft` commands for setting up the rules, chains and sets.
-func InitializeNFTables(table, fwdChain, inChain, target, bl, wl string, dryRun, addBaseObj bool) (*NFTables, error) {
-	nft := newNFTables(table, fwdChain, inChain, target, bl, wl, dryRun, addBaseObj)
+func InitializeNFTables(table, fwdChain, inChain, target, publicBl, bl, wl string, dryRun, addBaseObj bool) (*NFTables, error) {
+	nft := newNFTables(table, fwdChain, inChain, target, publicBl, bl, wl, dryRun, addBaseObj)
 
 	if addBaseObj {
 		if err := nft.addTableAndFlush(); err != nil {
@@ -836,11 +882,12 @@ func (nft *NFTables) addRegChainRulesAndFlush() error {
 	}
 	if len(rules) != 0 {
 		// there are already rules in the chain
-		blFound, wlFound := false, false
+		honeyFound, blFound, wlFound := false, false, false
 		for _, rule := range rules {
 			wlFound = wlFound || areRulesEql(rule, nft.Rules[WlRuleIdx], false)
 			blFound = blFound || areRulesEql(rule, nft.Rules[BlRuleIdx], false)
-			if wlFound && blFound {
+			honeyFound = honeyFound || areRulesEql(rule, nft.Rules[PublicBlRuleIdx], false)
+			if wlFound && blFound && honeyFound {
 				break
 			}
 		}
@@ -854,8 +901,13 @@ func (nft *NFTables) addRegChainRulesAndFlush() error {
 				return fmt.Errorf("failed to add target chain rule: %w", err)
 			}
 		}
+		if !honeyFound {
+			if err = nft.pushRuleAndFlush(nft.Rules[PublicBlRuleIdx]); err != nil {
+				return fmt.Errorf("failed to add target chain rule: %w", err)
+			}
+		}
 	} else {
-		for _, rule := range nft.Rules[WlRuleIdx : BlRuleIdx+1] {
+		for _, rule := range nft.Rules[WlRuleIdx:numberOfRules] {
 			nft.Conn.AddRule(rule)
 			nft.Commands = fmt.Sprintf("%s%s\n", nft.Commands, addRuleToString(rule))
 		}
@@ -917,14 +969,10 @@ func (nft *NFTables) delRulesAndFlush() error {
 }
 
 func (nft *NFTables) getSet(idx SetIdx) *nftables.Set {
-	switch idx {
-	case BlSet:
-		return nft.Sets[BlSet]
-	case WlSet:
-		return nft.Sets[WlSet]
-	default:
+	if idx >= numberOfSets {
 		return nil
 	}
+	return nft.Sets[idx]
 }
 
 func (nft *NFTables) setAddElements(set *nftables.Set, elements []nftables.SetElement) (cnt int) {
@@ -958,7 +1006,7 @@ func (nft *NFTables) setAddElementsAndFlush(set *nftables.Set, elements []nftabl
 	return nil
 }
 
-func (nft *NFTables) addIpsToSet(idx SetIdx, ips []string, timeout time.Duration) (cnt int, err error) {
+func (nft *NFTables) addStrIpsToSet(idx SetIdx, ips []string, timeout time.Duration) (cnt int, err error) {
 	var elements [2 * MaxSetSize]nftables.SetElement
 	cnt = 0
 	err = nil
@@ -969,7 +1017,30 @@ func (nft *NFTables) addIpsToSet(idx SetIdx, ips []string, timeout time.Duration
 	}
 	l, i := 0, 0
 	for i = 0; i < len(ips); i += l {
-		l = sElements.addIps(ips[i:], timeout)
+		l = sElements.addStrIps(ips[i:], timeout)
+		if l == 0 {
+			break
+		}
+		cnt += nft.setAddElements(set, elements[0:l])
+		if l >= len(ips[i:]) {
+			break
+		}
+	}
+	return
+}
+
+func (nft *NFTables) addBinIpsToSet(idx SetIdx, ips []net.IP, timeout time.Duration) (cnt int, err error) {
+	var elements [2 * MaxSetSize]nftables.SetElement
+	cnt = 0
+	err = nil
+	sElements := SetElements(elements[:])
+	set := nft.getSet(idx)
+	if set == nil {
+		return 0, fmt.Errorf(`unknown set (index %d)`, idx)
+	}
+	l, i := 0, 0
+	for i = 0; i < len(ips); i += l {
+		l = sElements.addBinIps(ips[i:], timeout)
 		if l == 0 {
 			break
 		}
@@ -982,11 +1053,15 @@ func (nft *NFTables) addIpsToSet(idx SetIdx, ips []string, timeout time.Duration
 }
 
 func (nft *NFTables) AddToWhitelist(ips []string, timeout time.Duration) (int, error) {
-	return nft.addIpsToSet(WlSet, ips, timeout)
+	return nft.addStrIpsToSet(WlSet, ips, timeout)
 }
 
 func (nft *NFTables) AddToBlacklist(ips []string, timeout time.Duration) (int, error) {
-	return nft.addIpsToSet(BlSet, ips, timeout)
+	return nft.addStrIpsToSet(BlSet, ips, timeout)
+}
+
+func (nft *NFTables) AddToPublicBlacklistBin(ips []net.IP, timeout time.Duration) (int, error) {
+	return nft.addBinIpsToSet(PublicBlSet, ips, timeout)
 }
 
 func (nft *NFTables) GetCommands() string {

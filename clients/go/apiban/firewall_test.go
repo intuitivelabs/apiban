@@ -62,7 +62,7 @@ func TestNftables(t *testing.T) {
 		t.Fatalf("could parse duration %s", err)
 	}
 	t.Run("initialize nftables", func(t *testing.T) {
-		fw, fwErr := InitializeFirewall("blacklist", "whitelist", config.DryRun, true)
+		fw, fwErr := InitializeFirewall("honeynet", "blacklist", "whitelist", config.DryRun, true)
 		if fwErr != nil {
 			t.Fatalf("%s", fwErr)
 		}
@@ -152,7 +152,7 @@ func TestNftables(t *testing.T) {
 		if nft == nil {
 			t.Skipf("nftables was not properly initialized")
 		}
-		if _, err = nft.addIpsToSet(BlSet, ips[:], u); err != nil {
+		if _, err = nft.addStrIpsToSet(BlSet, ips[:], u); err != nil {
 			t.Fatalf("could not add ip to set %s", err)
 		}
 	})
@@ -160,7 +160,7 @@ func TestNftables(t *testing.T) {
 		if nft == nil {
 			t.Skipf("nftables was not properly initialized")
 		}
-		if _, err = nft.addIpsToSet(WlSet, ips[:], u); err != nil {
+		if _, err = nft.addStrIpsToSet(WlSet, ips[:], u); err != nil {
 			t.Fatalf("could not add ip to set %s", err)
 		}
 	})
@@ -199,7 +199,7 @@ func TestIptables(t *testing.T) {
 		t.Fatalf("could parse duration %s", err)
 	}
 	t.Run("initialize iptables", func(t *testing.T) {
-		fw, err := InitializeFirewall("blacklist", "whitelist", config.DryRun, false)
+		fw, err := InitializeFirewall("honeynet", "blacklist", "whitelist", config.DryRun, false)
 		if err != nil {
 			t.Fatalf("%s", err)
 		}
