@@ -329,7 +329,7 @@ const (
 )
 
 // init the members of Api data structure
-func (api *Api) init(name, configId, baseUrl, path, token string, code APICode) {
+func (api *Api) init(name, configId, baseUrl, path, token, limit string, code APICode) {
 	for k := range api.Values {
 		delete(api.Values, k)
 	}
@@ -345,26 +345,45 @@ func (api *Api) init(name, configId, baseUrl, path, token string, code APICode) 
 	if len(token) > 0 {
 		api.Values.Add("token", token)
 	}
+	if len(limit) > 0 {
+		api.Values.Add("Limit", limit)
+	}
 }
 
-// string conversion
-func (api *Api) String() string {
+// String returns an string representation for API
+func (api Api) String() string {
 	return `API "` + api.Name + `" URL: ` + api.Url()
 }
 
-// Request sends an API request by encoding the URL and using after that Get().
-// If "timestamp" is an empty string it sets it to 0
-func (api *Api) Request() (Response, error) {
+// Url returns an string representation for the API's URL
+func (api Api) Url() string {
+	var apiUrl string
+
+	query := api.Values.Encode()
+
+	if len(query) > 0 {
+		apiUrl = fmt.Sprintf("%s%s?%s", api.BaseUrl, api.Path, query)
+	} else {
+		apiUrl = fmt.Sprintf("%s%s", api.BaseUrl, api.Path)
+	}
+
+	return apiUrl
+}
+
+// setTimestamp sets a `Timestamp` query parameter into the API `Values`
+func (api *Api) setTimestamp() {
 	if api.Timestamp == "" {
 		// start from 0 if an empty start timestamp was provided
 		api.Timestamp = "0"
 	}
 	api.Values.Set("timestamp", api.Timestamp)
-	return api.RequestWithQueryValues()
 }
 
-// RequestWithQueryValues sends an API request by encoding the URL and using after that Get().
-func (api *Api) RequestWithQueryValues() (Response, error) {
+// Request adds all generic query parameters to URL and sends an API request with Get().
+// If "timestamp" is an empty string it sets it to 0.
+func (api *Api) Request() (Response, error) {
+	api.setTimestamp()
+
 	url := api.Url()
 
 	// TODO debug
@@ -379,6 +398,29 @@ func (api *Api) RequestWithQueryValues() (Response, error) {
 		return nil, err
 	}
 	return response, nil
+}
+
+// Get sends an HTTP/GET request
+func (api Api) Get(url string) ([]byte, error) {
+	response, err := api.Client.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("api %s get error: %w", api.Path, err)
+	}
+	defer response.Body.Close()
+	switch code := response.StatusCode; {
+	case code == http.StatusBadRequest:
+		return nil, fmt.Errorf("bad request (%d): %s from %q", response.StatusCode, response.Status, url)
+	case code == http.StatusTooManyRequests:
+		return nil, fmt.Errorf("rate limit reached (%d): %s from %q", response.StatusCode, response.Status, url)
+	case code > http.StatusBadRequest && code < http.StatusInternalServerError:
+		return nil, fmt.Errorf("client error (%d): %s from %q", response.StatusCode, response.Status, url)
+	case code >= http.StatusInternalServerError:
+		return nil, fmt.Errorf("server error (%d): %s from %q", response.StatusCode, response.Status, url)
+	case code >= http.StatusMultipleChoices:
+		return nil, fmt.Errorf("unhandled error (%d): %s from %q", response.StatusCode, response.Status, url)
+	}
+
+	return ioutil.ReadAll(response.Body)
 }
 
 // Response processes the answer received from the API server
@@ -401,20 +443,6 @@ func (api *Api) Process() (err error) {
 	return
 }
 
-func (api Api) Url() string {
-	var apiUrl string
-
-	query := api.Values.Encode()
-
-	if len(query) > 0 {
-		apiUrl = fmt.Sprintf("%s%s?%s", api.BaseUrl, api.Path, query)
-	} else {
-		apiUrl = fmt.Sprintf("%s%s", api.BaseUrl, api.Path)
-	}
-
-	return apiUrl
-}
-
 func (api Api) parseResponse(msg []byte) (Response, error) {
 	var (
 		err          error
@@ -435,26 +463,4 @@ func (api Api) parseResponse(msg []byte) (Response, error) {
 	}
 
 	return nil, fmt.Errorf("%s: %w", ErrJsonParser.Error(), err)
-}
-
-func (api Api) Get(url string) ([]byte, error) {
-	response, err := api.Client.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("api %s get error: %w", api.Path, err)
-	}
-	defer response.Body.Close()
-	switch code := response.StatusCode; {
-	case code == http.StatusBadRequest:
-		return nil, fmt.Errorf("bad request (%d): %s from %q", response.StatusCode, response.Status, url)
-	case code == http.StatusTooManyRequests:
-		return nil, fmt.Errorf("rate limit reached (%d): %s from %q", response.StatusCode, response.Status, url)
-	case code > http.StatusBadRequest && code < http.StatusInternalServerError:
-		return nil, fmt.Errorf("client error (%d): %s from %q", response.StatusCode, response.Status, url)
-	case code >= http.StatusInternalServerError:
-		return nil, fmt.Errorf("server error (%d): %s from %q", response.StatusCode, response.Status, url)
-	case code >= http.StatusMultipleChoices:
-		return nil, fmt.Errorf("unhandled error (%d): %s from %q", response.StatusCode, response.Status, url)
-	}
-
-	return ioutil.ReadAll(response.Body)
 }
