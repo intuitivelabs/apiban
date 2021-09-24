@@ -17,7 +17,9 @@ type Firewall interface {
 	// blacklisting operation
 	AddToBlacklist([]string, time.Duration) (int, error)
 
+	// honeynet based blacklisting operation
 	AddToPublicBlacklistBin([]net.IP, time.Duration) (int, error)
+	AddToPublicBlacklist(Elements, time.Duration) (int, error)
 }
 
 const (
@@ -26,10 +28,11 @@ const (
 
 // errors
 var (
-	ErrFirewall         = errors.New("firewall missing")
-	ErrNoIptables       = errors.New("iptables was not found")
-	ErrNoBlacklistFound = errors.New("ipset blacklist was not found")
-	ErrNoWhitelistFound = errors.New("ipset whitelist was not found")
+	ErrFirewall               = errors.New("firewall missing")
+	ErrNoIptables             = errors.New("iptables was not found")
+	ErrNoBlacklistFound       = errors.New("ipset blacklist was not found")
+	ErrNoPublicBlacklistFound = errors.New("ipset public blacklist (honeynet) was not found")
+	ErrNoWhitelistFound       = errors.New("ipset whitelist was not found")
 )
 
 func GetFirewall() Firewall {
@@ -53,9 +56,16 @@ func AddToWhitelist(ips []string, ttl time.Duration) (int, error) {
 	return 0, ErrFirewall
 }
 
-func AddToPublicBlacklist(ips []net.IP, ttl time.Duration) (int, error) {
+func AddToPublicBlacklistBin(ips []net.IP, ttl time.Duration) (int, error) {
 	if fw := GetFirewall(); fw != nil {
 		return fw.AddToPublicBlacklistBin(ips, ttl)
+	}
+	return 0, ErrFirewall
+}
+
+func AddToPublicBlacklist(elems Elements, ttl time.Duration) (int, error) {
+	if fw := GetFirewall(); fw != nil {
+		return fw.AddToPublicBlacklist(elems, ttl)
 	}
 	return 0, ErrFirewall
 }
