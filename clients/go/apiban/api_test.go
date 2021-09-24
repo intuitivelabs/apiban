@@ -178,7 +178,7 @@ func TestApi(t *testing.T) {
 		UseNftables: true,
 	}
 	InitEncryption(&config)
-	RegisterIpApis("", "", "", "")
+	RegisterIpApis("", "", "", "", config.UseNftables)
 	if _, err = InitializeFirewall("honeynet", "blacklist", "whitelist", config.DryRun, true); err != nil {
 		t.Fatalf("failed to initialize firewall: %s", err)
 	}
