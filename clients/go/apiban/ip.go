@@ -25,7 +25,7 @@ func NewHoneynetIpApi(configId, baseUrl, token, limit string, bin bool) *Api {
 		Client:   defaultHttpClient,
 		IpBinary: bin,
 	}
-	bannedIpApi.init("IP blacklist", configId, baseUrl, BwV4List, token, limit, IpHoneynet)
+	bannedIpApi.init("IP public blacklist (honeynet)", configId, baseUrl, BwV4List, token, limit, IpHoneynet)
 	bannedIpApi.Values.Add("list", "ipblack")
 	bannedIpApi.Values.Add("honeynet", "true")
 	log.Printf("%s", bannedIpApi.String())
