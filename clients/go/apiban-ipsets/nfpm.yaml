@@ -38,5 +38,5 @@ rpm:
   group: Applications/Internet
   summary: Apiban client using ipsets
   config_noreplace_files:
-    ./config.json: /etc/apiban-ipsets/config.json
+    ./config.ini: /etc/apiban-ipsets/config.ini
       
