@@ -19,10 +19,11 @@ func NewBannedIpApi(configId, baseUrl, token, limit string) *Api {
 }
 
 // NewHoneynetApi returns an initialized Api object which can be used for retrieving blacklisted IP addresses from the public honeynet
-func NewHoneynetIpApi(configId, baseUrl, token, limit string) *Api {
+func NewHoneynetIpApi(configId, baseUrl, token, limit string, bin bool) *Api {
 	bannedIpApi := Api{
-		Values: url.Values{},
-		Client: defaultHttpClient,
+		Values:   url.Values{},
+		Client:   defaultHttpClient,
+		IpBinary: bin,
 	}
 	bannedIpApi.init("IP blacklist", configId, baseUrl, BwV4List, token, limit, IpHoneynet)
 	bannedIpApi.Values.Add("list", "ipblack")
@@ -43,9 +44,9 @@ func NewAllowedIpApi(configId, baseUrl, token, limit string) *Api {
 	return &allowedIpApi
 }
 
-func RegisterIpApis(configId, baseUrl, token, limit string) {
+func RegisterIpApis(configId, baseUrl, token, limit string, bin bool) {
 	Apis[IpBanned] = NewBannedIpApi(configId, baseUrl, token, limit)
-	Apis[IpHoneynet] = NewHoneynetIpApi(configId, baseUrl, token, limit)
+	Apis[IpHoneynet] = NewHoneynetIpApi(configId, baseUrl, token, limit, bin)
 	Apis[IpAllowed] = NewAllowedIpApi(configId, baseUrl, token, limit)
 }
 
@@ -54,6 +55,14 @@ func RegisterIpApis(configId, baseUrl, token, limit string) {
 type IP struct {
 	Encrypt string `json:"encrypt"`
 	Ipaddr  string `json:"ipaddr"`
+}
+
+func (ip *IP) String() string {
+	s, err := ip.Decrypt()
+	if err != nil {
+		return ""
+	}
+	return s
 }
 
 func (ip *IP) Decrypt() (string, error) {

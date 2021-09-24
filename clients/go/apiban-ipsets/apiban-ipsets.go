@@ -103,14 +103,14 @@ func main() {
 	log.Print("** client start")
 
 	// Open our config file
-	apiconfig, err := apiban.LoadConfig()
+	config, err := apiban.LoadConfig()
 	if err != nil {
 		log.Fatalln(err)
 	}
 
 	// Open our Log
-	if apiconfig.LogFilename != "-" && apiconfig.LogFilename != "stdout" {
-		lf, err := os.OpenFile(apiconfig.LogFilename,
+	if config.LogFilename != "-" && config.LogFilename != "stdout" {
+		lf, err := os.OpenFile(config.LogFilename,
 			os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -121,15 +121,15 @@ func main() {
 		log.SetOutput(lf)
 	}
 
-	if err := apiban.FixConfig(apiconfig); err != nil {
+	if err := apiban.FixConfig(config); err != nil {
 		log.Fatalln(err)
 	}
-	log.Print("target chain:", apiconfig.TgtChain)
+	log.Print("target chain:", config.TgtChain)
 
-	log.Print("time interval for checking the list:", apiconfig.Tick)
+	log.Print("time interval for checking the list:", config.Tick)
 
-	if apiconfig.StateFilename != "" {
-		apiban.GetState().Init(apiconfig.StateFilename)
+	if config.StateFilename != "" {
+		apiban.GetState().Init(config.StateFilename)
 	}
 	if useStateFile {
 		if err := apiban.GetState().LoadFromFile(); err != nil {
@@ -137,53 +137,37 @@ func main() {
 		}
 	}
 
-	apiban.InitEncryption(apiconfig)
+	apiban.InitEncryption(config)
 
 	//TODO debug
 	//fmt.Println("Initializing firewall...")
-	if _, err := apiban.InitializeFirewall("honeynet", "blacklist", "whitelist", apiconfig.DryRun, apiconfig.AddBaseObj); err != nil {
+	if _, err := apiban.InitializeFirewall("honeynet", "blacklist", "whitelist", config.DryRun, config.AddBaseObj); err != nil {
 		log.Fatalln("failed to initialize firewall: ", err)
 	}
 
-	if apiconfig.DryRun {
+	if config.DryRun {
 		return
 	}
 
-	//if iptinit == "chain created" {
-	//	log.Print("APIBAN chain was created - Resetting LKID")
-	//	apiconfig.Lkid = defaultId
-	//}
-
-	///	// Creating ipset "blacklist"
-	///	fmt.Println("Creating blacklist")
-	///	blset, err := ipset.New("blacklist", "hash:ip", &ipset.Params{})
-	///	if err != nil {
-	///		fmt.Print("Error", err)
-	///	}
-
-	//_, err := blset.List()
-	//if err != nil {
-	//	fmt.Print("Error", err)
-	//}
-	//fmt.Print("Content", content)
-	apiban.RegisterIpApis(apiconfig.Lkid, apiconfig.Url, apiconfig.Token, apiconfig.Limit)
-	apiban.RegisterUriApis(apiconfig.Lkid, apiconfig.Url, apiconfig.Token, apiconfig.Limit)
+	binIpOutput := config.UseNftables
+	apiban.RegisterIpApis(config.Lkid, config.Url, config.Token, config.Limit, binIpOutput)
+	apiban.RegisterUriApis(config.Lkid, config.Url, config.Token, config.Limit)
 
 	fmt.Println("going to run in a looop")
-	if err := run(ctx, *apiconfig, sigChan); err != nil {
+	if err := run(ctx, *config, sigChan); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 	}
 	wg.Wait()
 }
 
-func run(ctx context.Context, apiconfig apiban.Config, sigChan chan os.Signal) error {
+func run(ctx context.Context, config apiban.Config, sigChan chan os.Signal) error {
 	var err error
 	var cnt int
 	// use the last timestamp saved in the state file (if non zero)
 	// Get list of banned ip's from APIBAN.org
-	fmt.Println("URL", apiconfig.Url)
-	fmt.Print("TICK", apiconfig.Tick)
-	interval := apiconfig.Tick
+	fmt.Println("URL", config.Url)
+	fmt.Print("TICK", config.Tick)
+	interval := config.Tick
 
 	// start right away
 	currentTimeout := 1 * time.Nanosecond
