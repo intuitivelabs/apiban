@@ -51,6 +51,7 @@ type Resource interface {
 	// Process locally the resource received from the server (by applying b/w listing, fw rules aso)
 	// Process(ttl time.Duration, api APICode) error
 	Decrypt() (string, error)
+	String() string
 }
 
 // generic response object used for unmarshalling either IP or URI JSON objects
@@ -218,7 +219,7 @@ func (msg *JSONResponse) processElements(ttl time.Duration, api *Api) (int, erro
 	case IpAllowed:
 		return msg.processIpAllowed(ttl)
 	case IpHoneynet:
-		return msg.processIpHoneynet(ttl)
+		return msg.processIpHoneynet(ttl, api.IpBinary)
 	default:
 		return 0, ErrUnknownApi
 	}
@@ -237,10 +238,13 @@ func (msg *JSONResponse) processIpAllowed(ttl time.Duration) (int, error) {
 	return AddToWhitelist(ips, ttl)
 }
 
-func (msg *JSONResponse) processIpHoneynet(ttl time.Duration) (int, error) {
-	ips := make([]net.IP, len(msg.Elements))
-	msg.parseIpElements(0, ips)
-	return AddToPublicBlacklist(ips, ttl)
+func (msg *JSONResponse) processIpHoneynet(ttl time.Duration, bin bool) (int, error) {
+	if bin {
+		ips := make([]net.IP, len(msg.Elements))
+		msg.parseIpElements(0, ips)
+		return AddToPublicBlacklistBin(ips, ttl)
+	}
+	return AddToPublicBlacklist(msg.Elements, ttl)
 }
 
 // ErrResponse
@@ -295,8 +299,9 @@ type Api struct {
 	// timestamp to use for the next request
 	Timestamp string
 	// query parameters are stored here
-	Values url.Values
-	Code   APICode
+	Values   url.Values
+	Code     APICode
+	IpBinary bool
 }
 
 var (
