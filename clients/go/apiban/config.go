@@ -33,6 +33,7 @@ type Config struct {
 	Lkid     string        `long:"LKID" description:"lk id"`
 	Version  string        `long:"VERSION" description:"protocol version"`
 	Url      string        `long:"URL" description:"URL of blacklisted IPs DB"`
+	Limit    string        `long:"LIMIT" description:"maximum number of IP/URI entries returned in one API reply"`
 	TgtChain string        `long:"CHAIN" description:"netfilter target chain used for matching entries"`
 	Table    string        `long:"TABLE" description:"netfilter filter table"`
 	FwdChain string        `long:"FORWARD" description:"netfilter forwarding base chain"`
@@ -65,6 +66,7 @@ var DefaultConfig = Config{
 	Table:       "filter",
 	FwdChain:    "forward",
 	InChain:     "input",
+	Limit:       "2048",
 	LogFilename: "/var/log/apiban-ipsets.log",
 	Tick:        60 * time.Second,
 	Full:        "no",
@@ -198,6 +200,12 @@ func FixConfig(apiconfig *Config) error {
 		log.Print("LKID:", apiconfig.Lkid)
 	}
 
+	// fix the URL
+	if len(apiconfig.Url) == 0 {
+		apiconfig.Url = DefaultConfig.Url
+	} else if apiconfig.Url[len(apiconfig.Url)-1] != '/' {
+		apiconfig.Url = apiconfig.Url + "/"
+	}
 	// use default
 	if len(apiconfig.Table) == 0 {
 		apiconfig.Table = DefaultConfig.Table
@@ -210,6 +218,12 @@ func FixConfig(apiconfig *Config) error {
 	}
 	if len(apiconfig.InChain) == 0 {
 		apiconfig.InChain = DefaultConfig.InChain
+	}
+	if apiconfig.Tick == 0 {
+		apiconfig.Tick = DefaultConfig.Tick
+	}
+	if len(apiconfig.Limit) == 0 {
+		apiconfig.Limit = DefaultConfig.Limit
 	}
 	return nil
 }

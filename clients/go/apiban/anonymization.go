@@ -16,8 +16,8 @@ import (
 // errors
 var (
 	// encryption errors
-	ErrEncryptNoKey    = errors.New("no passphrase or encryption key configured")
-	ErrEncryptWrongKey = errors.New("validation code does not match")
+	ErrDecryptNoKey    = errors.New("no passphrase or decryption key configured")
+	ErrDecryptWrongKey = errors.New("wrong decryption key")
 )
 
 // anonymization objects
@@ -73,12 +73,21 @@ func InitEncryption(c *Config) {
 }
 
 func isPlainTxt(code string) bool {
-	return (code == "0") || (code == "plain")
+	if (code == "0") || (code == "plain") {
+		return true
+	}
+	split := strings.Split(code, ":")
+	if split[0] == "plain" {
+		return true
+	}
+	return false
 }
 
-func Validate(kvCode string) (err error) {
+func Validate(kvCode string) (encrypted bool, err error) {
 	err = nil
-	log.Print("encrypt field: ", kvCode)
+	encrypted = false
+	// TODO debug
+	//log.Print("encrypt field: ", kvCode)
 	if isPlainTxt(kvCode) {
 		// not encrypted; passthrough
 		return
@@ -91,31 +100,36 @@ func Validate(kvCode string) (err error) {
 	case 2:
 		// flags are present; get the code
 		kvCode = split[1]
-		log.Print("key validation code: ", kvCode)
+		// TODO debug
+		//log.Print("key validation code: ", kvCode)
 	default:
 		// broken format
 		err = fmt.Errorf("encrypt field unknown format: %s", kvCode)
 		return
 	}
 	if (Validator == nil) || (Ipcipher == nil) {
-		err = ErrEncryptNoKey
+		err = ErrDecryptNoKey
 		return
 	}
 	if !Validator.Validate(kvCode) {
-		err = ErrEncryptWrongKey
+		err = ErrDecryptWrongKey
 		return
 	}
+	encrypted = true
 	return
 }
 
 func DecryptIp(encrypted string, kvCode string) (decrypted string, err error) {
 	// check the string type for "encrypt" field
 	err = nil
+	isEncrypted := false
 	decrypted = encrypted
-	if err = Validate(kvCode); err != nil {
+	if isEncrypted, err = Validate(kvCode); err != nil {
 		err = fmt.Errorf("IP address decrypt error: %w", err)
 		return
 	}
-	decrypted = Ipcipher.(*anonymization.Ipcipher).DecryptStr(encrypted)
+	if isEncrypted {
+		decrypted = Ipcipher.(*anonymization.Ipcipher).DecryptStr(encrypted)
+	}
 	return
 }
