@@ -1064,6 +1064,10 @@ func (nft *NFTables) AddToPublicBlacklistBin(ips []net.IP, timeout time.Duration
 	return nft.addBinIpsToSet(PublicBlSet, ips, timeout)
 }
 
+func (nft *NFTables) AddToPublicBlacklist(elemes Elements, timeout time.Duration) (int, error) {
+	return 0, nil
+}
+
 func (nft *NFTables) GetCommands() string {
 	return nft.Commands
 }

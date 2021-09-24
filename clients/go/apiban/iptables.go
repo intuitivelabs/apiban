@@ -243,6 +243,22 @@ func (ipt *IPTables) AddToPublicBlacklistBin(ips []net.IP, timeout time.Duration
 	return 0, nil
 }
 
+func (ipt *IPTables) AddToPublicBlacklist(elems Elements, timeout time.Duration) (cnt int, err error) {
+	err = ErrNoPublicBlacklistFound
+	cnt = 0
+	if set, ok := ipt.Sets[ipt.PublicBl]; ok {
+		err = nil
+		t := int(timeout.Seconds())
+		for _, ip := range elems {
+			if e := set.Add(ip.r.String(), t); e == nil {
+				cnt++
+			}
+		}
+		return
+	}
+	return
+}
+
 func (ipt *IPTables) AddToWhitelist(ips []string, timeout time.Duration) (cnt int, err error) {
 	err = ErrNoWhitelistFound
 	cnt = 0
