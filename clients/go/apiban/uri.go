@@ -18,6 +18,14 @@ func (uri *URI) Process(ttl time.Duration, api APICode) error {
 	return nil
 }
 
+func (uri *URI) String() string {
+	s, err := uri.Decrypt()
+	if err != nil {
+		return ""
+	}
+	return s
+}
+
 func (uri *URI) Decrypt() (string, error) {
 	return "", nil
 }
