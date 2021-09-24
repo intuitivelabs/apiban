@@ -166,8 +166,8 @@ func main() {
 	//	fmt.Print("Error", err)
 	//}
 	//fmt.Print("Content", content)
-	apiban.RegisterIpApis(apiconfig.Lkid, apiconfig.Url, apiconfig.Token)
-	apiban.RegisterUriApis(apiconfig.Lkid, apiconfig.Url, apiconfig.Token)
+	apiban.RegisterIpApis(apiconfig.Lkid, apiconfig.Url, apiconfig.Token, apiconfig.Limit)
+	apiban.RegisterUriApis(apiconfig.Lkid, apiconfig.Url, apiconfig.Token, apiconfig.Limit)
 
 	fmt.Println("going to run in a looop")
 	if err := run(ctx, *apiconfig, sigChan); err != nil {

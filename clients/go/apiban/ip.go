@@ -7,24 +7,24 @@ import (
 )
 
 // NewBannedApi returns an initialized Api object which can be used for retrieving blacklisted IP addresses
-func NewBannedIpApi(configId, baseUrl, token string) *Api {
+func NewBannedIpApi(configId, baseUrl, token, limit string) *Api {
 	bannedIpApi := Api{
 		Values: url.Values{},
 		Client: defaultHttpClient,
 	}
-	bannedIpApi.init("IP blacklist", configId, baseUrl, BwV4List, token, IpBanned)
+	bannedIpApi.init("IP blacklist", configId, baseUrl, BwV4List, token, limit, IpBanned)
 	bannedIpApi.Values.Add("list", "ipblack")
 	log.Printf("%s", bannedIpApi.String())
 	return &bannedIpApi
 }
 
 // NewHoneynetApi returns an initialized Api object which can be used for retrieving blacklisted IP addresses from the public honeynet
-func NewHoneynetIpApi(configId, baseUrl, token string) *Api {
+func NewHoneynetIpApi(configId, baseUrl, token, limit string) *Api {
 	bannedIpApi := Api{
 		Values: url.Values{},
 		Client: defaultHttpClient,
 	}
-	bannedIpApi.init("IP blacklist", configId, baseUrl, BwV4List, token, IpHoneynet)
+	bannedIpApi.init("IP blacklist", configId, baseUrl, BwV4List, token, limit, IpHoneynet)
 	bannedIpApi.Values.Add("list", "ipblack")
 	bannedIpApi.Values.Add("honeynet", "true")
 	log.Printf("%s", bannedIpApi.String())
@@ -32,21 +32,21 @@ func NewHoneynetIpApi(configId, baseUrl, token string) *Api {
 }
 
 // NewAllowedApi returns an initialized Api object which can be used for retrieving whitelisted IP addresses
-func NewAllowedIpApi(configId, baseUrl, token string) *Api {
+func NewAllowedIpApi(configId, baseUrl, token, limit string) *Api {
 	allowedIpApi := Api{
 		Values: url.Values{},
 		Client: defaultHttpClient,
 	}
-	allowedIpApi.init("IP whitelist", configId, baseUrl, BwV4List, token, IpAllowed)
+	allowedIpApi.init("IP whitelist", configId, baseUrl, BwV4List, token, limit, IpAllowed)
 	allowedIpApi.Values.Add("list", "ipwhite")
 	log.Printf("%s", allowedIpApi.String())
 	return &allowedIpApi
 }
 
-func RegisterIpApis(configId, baseUrl, token string) {
-	Apis[IpBanned] = NewBannedIpApi(configId, baseUrl, token)
-	Apis[IpHoneynet] = NewHoneynetIpApi(configId, baseUrl, token)
-	Apis[IpAllowed] = NewAllowedIpApi(configId, baseUrl, token)
+func RegisterIpApis(configId, baseUrl, token, limit string) {
+	Apis[IpBanned] = NewBannedIpApi(configId, baseUrl, token, limit)
+	Apis[IpHoneynet] = NewHoneynetIpApi(configId, baseUrl, token, limit)
+	Apis[IpAllowed] = NewAllowedIpApi(configId, baseUrl, token, limit)
 }
 
 // IP Resource JSON objects in API responses.
