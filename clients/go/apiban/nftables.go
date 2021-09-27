@@ -926,7 +926,7 @@ func (nft *NFTables) addRegChainRulesAndFlush() error {
 				nft.Table.Name, nft.RegChain.Name, err)
 		}
 		for i, rule := range rules {
-			if i > 1 {
+			if i > 2 {
 				break
 			}
 			nft.Rules[WlRuleIdx+i].Handle = rule.Handle

@@ -184,6 +184,9 @@ func (ipt *IPTables) InsertIpsetRule(table, chain, set string, accept bool) (err
 			}
 			// store the newly created ipset
 			ipt.Sets[set] = s
+		} else {
+			// empty ipset
+			ipt.Sets[set] = &ipset.IPSet{Name: set}
 		}
 	}
 	// Check if the rule exists
@@ -194,6 +197,7 @@ func (ipt *IPTables) InsertIpsetRule(table, chain, set string, accept bool) (err
 			err = fmt.Errorf("rule check error: %w", iptablesErr)
 			return
 		}
+		log.Printf(`WARNING: rule check error: "%s"`, iptablesErr)
 	}
 	if exists {
 		log.Printf(`WARNING: rule already exists: "-t %s -C %s -m set --match-set %s src -j %s"`, table, chain, set, target)
@@ -223,18 +227,37 @@ func (ipt *IPTables) GetCommands() string {
 	return ipt.Commands
 }
 
+func (ipt *IPTables) AddStrToSet(set *ipset.IPSet, ips []string, timeout time.Duration) (cnt int) {
+	t := int(timeout.Seconds())
+	for _, ip := range ips {
+		if !ipt.dryRun {
+			if err := set.Add(ip, t); err != nil {
+				continue
+			}
+		}
+		cnt++
+	}
+	return
+}
+
+func (ipt *IPTables) AddElemToSet(set *ipset.IPSet, elems Elements, timeout time.Duration) (cnt int) {
+	t := int(timeout.Seconds())
+	for _, ip := range elems {
+		if !ipt.dryRun {
+			if err := set.Add(ip.r.String(), t); err != nil {
+				continue
+			}
+		}
+		cnt++
+	}
+	return
+}
+
 func (ipt *IPTables) AddToBlacklist(ips []string, timeout time.Duration) (cnt int, err error) {
 	err = ErrNoBlacklistFound
 	cnt = 0
 	if set, ok := ipt.Sets[ipt.Bl]; ok {
-		err = nil
-		t := int(timeout.Seconds())
-		for _, ip := range ips {
-			if e := set.Add(ip, t); e == nil {
-				cnt++
-			}
-		}
-		return
+		return ipt.AddStrToSet(set, ips, timeout), nil
 	}
 	return
 }
@@ -247,14 +270,7 @@ func (ipt *IPTables) AddToPublicBlacklist(elems Elements, timeout time.Duration)
 	err = ErrNoPublicBlacklistFound
 	cnt = 0
 	if set, ok := ipt.Sets[ipt.PublicBl]; ok {
-		err = nil
-		t := int(timeout.Seconds())
-		for _, ip := range elems {
-			if e := set.Add(ip.r.String(), t); e == nil {
-				cnt++
-			}
-		}
-		return
+		return ipt.AddElemToSet(set, elems, timeout), nil
 	}
 	return
 }
@@ -263,14 +279,7 @@ func (ipt *IPTables) AddToWhitelist(ips []string, timeout time.Duration) (cnt in
 	err = ErrNoWhitelistFound
 	cnt = 0
 	if set, ok := ipt.Sets[ipt.Wl]; ok {
-		err = nil
-		t := int(timeout.Seconds())
-		for _, ip := range ips {
-			if e := set.Add(ip, t); e == nil {
-				cnt++
-			}
-		}
-		return
+		return ipt.AddStrToSet(set, ips, timeout), nil
 	}
 	return
 }
