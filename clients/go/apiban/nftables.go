@@ -978,6 +978,7 @@ func (nft *NFTables) getSet(idx SetIdx) *nftables.Set {
 func (nft *NFTables) setAddElements(set *nftables.Set, elements []nftables.SetElement) (cnt int) {
 	var i int
 	for i = 0; i < len(elements)/MaxSetSize; i++ {
+		fmt.Printf("loop (i): %d\n", i)
 		if err := nft.setAddElementsAndFlush(set, elements[i*MaxSetSize:(i+1)*MaxSetSize]); err != nil {
 			log.Printf(ErrAddSetElements, set.Name, err)
 		} else {
@@ -1038,9 +1039,11 @@ func (nft *NFTables) addBinIpsToSet(idx SetIdx, ips []net.IP, timeout time.Durat
 	if set == nil {
 		return 0, fmt.Errorf(`unknown set (index %d)`, idx)
 	}
+	fmt.Printf("number of ip addresses len(ips)=%d\n", len(ips))
 	l, i := 0, 0
 	for i = 0; i < len(ips); i += l {
 		l = sElements.addBinIps(ips[i:], timeout)
+		fmt.Printf("currently loaded (l): %d\n", l)
 		if l == 0 {
 			break
 		}

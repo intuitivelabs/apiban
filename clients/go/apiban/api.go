@@ -116,9 +116,15 @@ func (msg *JSONResponse) Process(api *Api) error {
 
 	// TODO debug
 	//log.Print("ttl: ", ttl)
+
+	// store the next key in the api datastructure
+	api.Key = msg.Metadata.NextEncodedKey()
+
 	if timestamp, err := msg.Metadata.Timestamp(); err != nil {
 		return err
-	} else {
+	} else if api.Key == nil {
+		// subsequent requests within the same API call are sent with the first request's timestamp
+		// store the timestamp only if this is the last response
 		api.Timestamp = strconv.Itoa(timestamp)
 	}
 
@@ -255,8 +261,11 @@ type ErrResponse struct {
 
 func (msg *ErrResponse) Process(api *Api) error {
 	log.Printf(`received an error response for api "%s": %d %s`, api.Path, msg.StatusCode, msg.StatusDescription)
+	// do not send any subsequent request within this API call
+	api.Key = nil
 	return nil
 }
+
 func (metadata JSONMap) Ttl() (ttl int, err error) {
 	ttl = 0
 	err = nil
@@ -289,6 +298,17 @@ func (metadata JSONMap) Timestamp() (timestamp int, err error) {
 	return
 }
 
+func (metadata JSONMap) NextEncodedKey() *string {
+	if metaKey, ok := metadata["nextEncodedKey"]; ok {
+		key, _ := metaKey.(string)
+		if len(key) == 0 {
+			return nil
+		}
+		return &key
+	}
+	return nil
+}
+
 // API generic processing
 type Api struct {
 	Name     string
@@ -298,6 +318,8 @@ type Api struct {
 	Path     string
 	// timestamp to use for the next request
 	Timestamp string
+	// Key for the next subsequent request within one API call
+	Key *string
 	// query parameters are stored here
 	Values   url.Values
 	Code     APICode
@@ -375,7 +397,7 @@ func (api Api) Url() string {
 	return apiUrl
 }
 
-// setTimestamp sets a `Timestamp` query parameter into the API `Values`
+// setTimestamp sets a `Timestamp` query parameter into the API `Values` based on the `Timestamp` member value.
 func (api *Api) setTimestamp() {
 	if api.Timestamp == "" {
 		// start from 0 if an empty start timestamp was provided
@@ -384,15 +406,32 @@ func (api *Api) setTimestamp() {
 	api.Values.Set("timestamp", api.Timestamp)
 }
 
-// Request adds all generic query parameters to URL and sends an API request with Get().
+// setKey sets a `nextEncodedKey` query parameter into the API `Values` based on the `Key` member value.
+// If `Key` is nil the query parameter is deleted from `Values`.
+func (api *Api) setKey() {
+	if api.Key != nil {
+		api.Values.Set("nextEncodedKey", *api.Key)
+	} else {
+		api.Values.Del("nextEncodedKey")
+	}
+}
+
+func (api *Api) delKey() {
+	api.Key = nil
+	api.setKey()
+}
+
+// Request adds all generic query parameters to URL, sends an API request with Get() and returns the parsed response.
 // If "timestamp" is an empty string it sets it to 0.
 func (api *Api) Request() (Response, error) {
+	// set query parameters
 	api.setTimestamp()
+	api.setKey()
 
 	url := api.Url()
 
 	// TODO debug
-	//log.Printf(`"%s" api url: %s`, api.Path, url)
+	log.Printf(`"%s" api url: %s`, api.Path, url)
 	buf, err := api.Get(url)
 	if err != nil {
 		return nil, err
@@ -428,23 +467,44 @@ func (api Api) Get(url string) ([]byte, error) {
 	return ioutil.ReadAll(response.Body)
 }
 
-// Response processes the answer received from the API server
-func (api *Api) Response(msg Response) error {
-	return msg.Process(api)
+// Response processes the answer received from the API server.
+// It returns a boolean flag which shows if this is the last response and a possible error.
+func (api *Api) Response(msg Response) (bool, error) {
+	if err := msg.Process(api); err != nil {
+		return true, err
+	}
+	return api.Key == nil, nil
 }
 
 // Process sends an HTTP request and processes the received request.
 // It uses an URL built like this from the input parameters:
 // https://baseUrl/key/banned/startFrom?version=version
 func (api *Api) Process() (err error) {
-	res, err := api.Request()
-	if err != nil {
-		err = fmt.Errorf(`%s request error: %w`, api.Path, err)
-	} else if res == nil {
-		err = fmt.Errorf(`%s response with empty body`, api.Path)
-	} else {
-		err = api.Response(res)
+	err = nil
+	for true {
+		// build and send the API request
+		res, err := api.Request()
+		if err != nil {
+			err = fmt.Errorf(`%s request error: %w`, api.Path, err)
+			break
+		}
+		if res == nil {
+			err = fmt.Errorf(`%s response with empty body`, api.Path)
+			break
+		}
+		// process the API response
+		last, err := api.Response(res)
+		if err != nil {
+			err = fmt.Errorf(`%s response processing error %w`, api.Path, err)
+			break
+		}
+		if last {
+			break
+		}
 	}
+	// remove the key parameter from the query since it is not used in the
+	// first request of the API call.
+	api.delKey()
 	return
 }
 
