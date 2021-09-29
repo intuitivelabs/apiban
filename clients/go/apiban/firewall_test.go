@@ -54,7 +54,7 @@ func TestNftables(t *testing.T) {
 		DryRun:      false,
 		UseNftables: true,
 	}
-	if ips, err = generateAddrRange("10", 10); err != nil {
+	if ips, err = generateAddrRange("10", 1024); err != nil {
 		t.Fatalf("could not generate address range %s", err)
 	}
 	u, err := time.ParseDuration("1m")
