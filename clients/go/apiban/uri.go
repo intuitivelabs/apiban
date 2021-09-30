@@ -36,7 +36,7 @@ func NewBannedUriApi(configId, baseUrl, token, limit string) *Api {
 		Values: url.Values{},
 		Client: defaultHttpClient,
 	}
-	bannedUriApi.init("SIP URI blacklist", configId, baseUrl, BwV4List, token, limit, UriBanned)
+	bannedUriApi.Init("SIP URI blacklist", configId, baseUrl, BwV4List, token, limit, UriBanned)
 	bannedUriApi.Values.Add("list", "uriblack")
 	log.Printf("%s", bannedUriApi.String())
 	return &bannedUriApi
@@ -48,7 +48,7 @@ func NewAllowedUriApi(configId, baseUrl, token, limit string) *Api {
 		Values: url.Values{},
 		Client: defaultHttpClient,
 	}
-	allowedUriApi.init("SIP URI whitelist", configId, baseUrl, BwV4List, token, limit, UriAllowed)
+	allowedUriApi.Init("SIP URI whitelist", configId, baseUrl, BwV4List, token, limit, UriAllowed)
 	allowedUriApi.Values.Add("list", "uriwhite")
 	log.Printf("%s", allowedUriApi.String())
 	return &allowedUriApi
