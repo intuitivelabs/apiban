@@ -20,16 +20,16 @@ func NewBannedIpApi(configId, baseUrl, token, limit string) *Api {
 
 // NewHoneynetApi returns an initialized Api object which can be used for retrieving blacklisted IP addresses from the public honeynet
 func NewHoneynetIpApi(configId, baseUrl, token, limit string, bin bool) *Api {
-	bannedIpApi := Api{
+	honeynetIpApi := Api{
 		Values:   url.Values{},
 		Client:   defaultHttpClient,
 		IpBinary: bin,
 	}
-	bannedIpApi.init("IP public blacklist (honeynet)", configId, baseUrl, BwV4List, token, limit, IpHoneynet)
-	bannedIpApi.Values.Add("list", "ipblack")
-	bannedIpApi.Values.Add("honeynet", "true")
-	log.Printf("%s", bannedIpApi.String())
-	return &bannedIpApi
+	honeynetIpApi.init("IP public blacklist (honeynet)", configId, baseUrl, BwV4List, token, limit, IpHoneynet)
+	honeynetIpApi.Values.Add("list", "ipblack")
+	honeynetIpApi.Values.Add("honeynet", "true")
+	log.Printf("%s", honeynetIpApi.String())
+	return &honeynetIpApi
 }
 
 // NewAllowedApi returns an initialized Api object which can be used for retrieving whitelisted IP addresses
