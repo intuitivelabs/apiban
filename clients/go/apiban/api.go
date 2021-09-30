@@ -320,18 +320,23 @@ type Api struct {
 	Timestamp string
 	// Key for the next subsequent request within one API call
 	Key *string
-	// query parameters are stored here
+	// query parameters dictionary.
+	// mandatory parameters used by all API calls:
+	// - "token": SSO authentication and authorization token
+	// - "limit": upper limit for how many elements (records) are sent in a response
 	Values   url.Values
 	Code     APICode
 	IpBinary bool
 }
 
 var (
+	defaultHttpClientTimeout = 2 * time.Second
 	// client used for all API requests
 	defaultHttpClient = http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
+		Timeout: defaultHttpClientTimeout,
 	}
 	// API register
 	Apis [numberOfApis]*Api
@@ -355,10 +360,17 @@ const (
 	BwV4List = "bwnoa/v4list"
 )
 
-// init the members of Api data structure
-func (api *Api) init(name, configId, baseUrl, path, token, limit string, code APICode) {
+// Init the members of Api data structure.
+// name, configId, baseUrl and path are used as such to initialize api structure members.
+// Non-empty token and limit are loaded into the api.Values map and used as query parameters in the URL.
+// Internally the API is represented using code. The http client will use the specified (optional) timeout.
+func (api *Api) Init(name, configId, baseUrl, path, token, limit string, code APICode, timeout ...time.Duration) {
 	for k := range api.Values {
 		delete(api.Values, k)
+	}
+	api.Client.Timeout = defaultHttpClientTimeout
+	if len(timeout) > 0 {
+		api.Client.Timeout = timeout[0]
 	}
 	api.Name = name
 	api.Code = code

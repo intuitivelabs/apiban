@@ -12,7 +12,7 @@ func NewBannedIpApi(configId, baseUrl, token, limit string) *Api {
 		Values: url.Values{},
 		Client: defaultHttpClient,
 	}
-	bannedIpApi.init("IP blacklist", configId, baseUrl, BwV4List, token, limit, IpBanned)
+	bannedIpApi.Init("IP blacklist", configId, baseUrl, BwV4List, token, limit, IpBanned)
 	bannedIpApi.Values.Add("list", "ipblack")
 	log.Printf("%s", bannedIpApi.String())
 	return &bannedIpApi
@@ -25,7 +25,7 @@ func NewHoneynetIpApi(configId, baseUrl, token, limit string, bin bool) *Api {
 		Client:   defaultHttpClient,
 		IpBinary: bin,
 	}
-	honeynetIpApi.init("IP public blacklist (honeynet)", configId, baseUrl, BwV4List, token, limit, IpHoneynet)
+	honeynetIpApi.Init("IP public blacklist (honeynet)", configId, baseUrl, BwV4List, token, limit, IpHoneynet)
 	honeynetIpApi.Values.Add("list", "ipblack")
 	honeynetIpApi.Values.Add("honeynet", "true")
 	log.Printf("%s", honeynetIpApi.String())
@@ -38,7 +38,7 @@ func NewAllowedIpApi(configId, baseUrl, token, limit string) *Api {
 		Values: url.Values{},
 		Client: defaultHttpClient,
 	}
-	allowedIpApi.init("IP whitelist", configId, baseUrl, BwV4List, token, limit, IpAllowed)
+	allowedIpApi.Init("IP whitelist", configId, baseUrl, BwV4List, token, limit, IpAllowed)
 	allowedIpApi.Values.Add("list", "ipwhite")
 	log.Printf("%s", allowedIpApi.String())
 	return &allowedIpApi
