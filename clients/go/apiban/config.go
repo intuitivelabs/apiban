@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 
@@ -173,6 +174,11 @@ func LoadConfig() (*Config, error) {
 		cfg.BlacklistTtl = 0
 	}
 
+	if len(cfg.Limit) > 0 {
+		if _, err := strconv.Atoi(cfg.Limit); err != nil {
+			return nil, fmt.Errorf(`failed to read configuration from "%s": LIMIT does not specify an integer: "%s"`, loc, cfg.Limit)
+		}
+	}
 	if len(cfg.Passphrase) != 0 && len(cfg.EncryptionKey) != 0 {
 		return nil, fmt.Errorf("failed to read configuration from %s: both passphrase and encryption key are provided", loc)
 	}
