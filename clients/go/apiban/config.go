@@ -38,7 +38,7 @@ type Config struct {
 	Table    string        `long:"TABLE" description:"netfilter filter table"`
 	FwdChain string        `long:"FORWARD" description:"netfilter forwarding base chain"`
 	InChain  string        `long:"INPUT" description:"netfilter input base chain"`
-	Tick     time.Duration `long:"INTERVAL" description:"interval for the list refresh"`
+	Tick     time.Duration `long:"TICK" description:"interval for the list refresh"`
 	Full     string        `long:"FULL" description:"yes/no - starting from scratch"`
 	// state filename
 	StateFilename string `long:"STATE_FILENAME" description:"filename for keeping the state"`
