@@ -1,10 +1,13 @@
-package apiban
+package firewall
 
 import (
 	"errors"
 	"log"
 	"net"
 	"time"
+
+	"github.com/intuitivelabs/apiban/clients/go/internal/pkg/config"
+	"github.com/intuitivelabs/apiban/clients/go/internal/pkg/parser"
 )
 
 type Firewall interface {
@@ -19,7 +22,7 @@ type Firewall interface {
 
 	// honeynet based blacklisting operation
 	AddToPublicBlacklistBin([]net.IP, time.Duration) (int, error)
-	AddToPublicBlacklist(Elements, time.Duration) (int, error)
+	AddToPublicBlacklist(parser.Elements, time.Duration) (int, error)
 }
 
 const (
@@ -36,7 +39,7 @@ var (
 )
 
 func GetFirewall() Firewall {
-	if GetConfig().UseNftables {
+	if config.GetConfig().UseNftables {
 		return nfTables
 	}
 	return ipTables
@@ -63,7 +66,7 @@ func AddToPublicBlacklistBin(ips []net.IP, ttl time.Duration) (int, error) {
 	return 0, ErrFirewall
 }
 
-func AddToPublicBlacklist(elems Elements, ttl time.Duration) (int, error) {
+func AddToPublicBlacklist(elems parser.Elements, ttl time.Duration) (int, error) {
 	if fw := GetFirewall(); fw != nil {
 		return fw.AddToPublicBlacklist(elems, ttl)
 	}
@@ -71,10 +74,10 @@ func AddToPublicBlacklist(elems Elements, ttl time.Duration) (int, error) {
 }
 
 func InitializeFirewall(publicBl, bl, wl string, dryRun, addBaseObj bool) (fw Firewall, err error) {
-	if GetConfig().UseNftables {
-		fw, err = InitializeNFTables(GetConfig().Table, GetConfig().FwdChain, GetConfig().InChain, GetConfig().TgtChain, publicBl, bl, wl, dryRun, addBaseObj)
+	if config.GetConfig().UseNftables {
+		fw, err = InitializeNFTables(config.GetConfig().Table, config.GetConfig().FwdChain, config.GetConfig().InChain, config.GetConfig().TgtChain, publicBl, bl, wl, dryRun, addBaseObj)
 	} else {
-		fw, err = InitializeIPTables(GetConfig().TgtChain, publicBl, bl, wl, dryRun)
+		fw, err = InitializeIPTables(config.GetConfig().TgtChain, publicBl, bl, wl, dryRun)
 	}
 	if dryRun {
 		log.Printf("firewall commands:\n%s", fw.GetCommands())
