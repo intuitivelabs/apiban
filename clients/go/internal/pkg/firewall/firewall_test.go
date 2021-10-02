@@ -1,4 +1,4 @@
-package apiban
+package firewall
 
 import (
 	"errors"

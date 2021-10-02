@@ -1,8 +1,9 @@
-package apiban
+package firewall
 
 import (
 	"fmt"
 	"github.com/coreos/go-iptables/iptables"
+	"github.com/intuitivelabs/apiban/clients/go/internal/pkg/parser"
 	"github.com/vladabroz/go-ipset/ipset"
 	"log"
 	"net"
@@ -240,11 +241,11 @@ func (ipt *IPTables) AddStrToSet(set *ipset.IPSet, ips []string, timeout time.Du
 	return
 }
 
-func (ipt *IPTables) AddElemToSet(set *ipset.IPSet, elems Elements, timeout time.Duration) (cnt int) {
+func (ipt *IPTables) AddElemToSet(set *ipset.IPSet, elems parser.Elements, timeout time.Duration) (cnt int) {
 	t := int(timeout.Seconds())
 	for _, ip := range elems {
 		if !ipt.dryRun {
-			if err := set.Add(ip.r.String(), t); err != nil {
+			if err := set.Add(ip.R.String(), t); err != nil {
 				continue
 			}
 		}
@@ -266,7 +267,7 @@ func (ipt *IPTables) AddToPublicBlacklistBin(ips []net.IP, timeout time.Duration
 	return 0, nil
 }
 
-func (ipt *IPTables) AddToPublicBlacklist(elems Elements, timeout time.Duration) (cnt int, err error) {
+func (ipt *IPTables) AddToPublicBlacklist(elems parser.Elements, timeout time.Duration) (cnt int, err error) {
 	err = ErrNoPublicBlacklistFound
 	cnt = 0
 	if set, ok := ipt.Sets[ipt.PublicBl]; ok {

@@ -1,4 +1,4 @@
-package apiban
+package firewall
 
 import (
 	"errors"
@@ -9,6 +9,8 @@ import (
 	"time"
 	//"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
+
+	"github.com/intuitivelabs/apiban/clients/go/internal/pkg/parser"
 )
 
 // nftables specific errors
@@ -1064,7 +1066,7 @@ func (nft *NFTables) AddToPublicBlacklistBin(ips []net.IP, timeout time.Duration
 	return nft.addBinIpsToSet(PublicBlSet, ips, timeout)
 }
 
-func (nft *NFTables) AddToPublicBlacklist(elemes Elements, timeout time.Duration) (int, error) {
+func (nft *NFTables) AddToPublicBlacklist(elemes parser.Elements, timeout time.Duration) (int, error) {
 	return 0, nil
 }
 
