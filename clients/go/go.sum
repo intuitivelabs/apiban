@@ -13,6 +13,7 @@ github.com/google/uuid v1.2.0 h1:qJYtXnJRWmpe7m/3XlyhrsLrEURqHRM2kxzoxXqyUDs=
 github.com/google/uuid v1.2.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
 github.com/intuitivelabs/anonymization v1.0.3-0.20210318230746-211d959e1e5f h1:Kl6ihmqp11SS199lfgIOwvH3C8/AdItbxRKwJTY7ZXs=
 github.com/intuitivelabs/anonymization v1.0.3-0.20210318230746-211d959e1e5f/go.mod h1:IPXLNFwTI7SvKipJ/EcLR8ma/6hDLHyFFagWVkd++gU=
+github.com/intuitivelabs/apiban v0.0.0-20210930160535-96b53869a19f h1:oXY3ohD4JvqF8E8duCBPLhKrJ6sTHvHRCkC1n2U19qk=
 github.com/intuitivelabs/ipcrypt v1.1.0 h1:nLWT//mwecB7JC2/e7XSHasjRetJVqBnOCYrNW6WmQ4=
 github.com/intuitivelabs/ipcrypt v1.1.0/go.mod h1:1Tbk2GMxSflaUSwrQaFnMrg1VvTDM4JO3Jbh7RzPjSs=
 github.com/jessevdk/go-flags v1.5.0 h1:1jKYvbxEjfUl0fmqTCOfonvskHHXMjBySTLW4y9LFvc=
