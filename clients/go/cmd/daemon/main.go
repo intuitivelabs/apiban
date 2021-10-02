@@ -1,24 +1,3 @@
-/*
- * Copyright (C) 2020 Fred Posner (palner.com)
- *
- * This file is part of APIBAN.org.
- *
- * apiban-iptables-client is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version
- *
- * apiban-iptables-client is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
- *
- */
-
 package main
 
 import (
@@ -33,11 +12,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/intuitivelabs/apiban/clients/go/apiban"
+	"github.com/intuitivelabs/apiban/clients/go/internal/pkg/anonymization"
+	"github.com/intuitivelabs/apiban/clients/go/internal/pkg/api"
+	"github.com/intuitivelabs/apiban/clients/go/internal/pkg/config"
+	"github.com/intuitivelabs/apiban/clients/go/internal/pkg/firewall"
 )
 
 var (
 	useStateFile = false
+	logFile      *os.File
+	cfg          *config.Config
 )
 
 // profiler
@@ -47,6 +31,52 @@ var (
 )
 
 func init() {
+	var err error
+	// Open our config file
+	cfg, err = config.LoadConfig()
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	// Open our Log
+	if cfg.LogFilename != "-" && cfg.LogFilename != "stdout" {
+		logFile, err := os.OpenFile(cfg.LogFilename,
+			os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(-1)
+		}
+
+		log.SetOutput(logFile)
+	}
+
+	if err := config.FixConfig(cfg); err != nil {
+		log.Fatalln(err)
+	}
+
+	if cfg.StateFilename != "" {
+		config.GetState().Init(cfg.StateFilename)
+	}
+	if useStateFile {
+		if err := config.GetState().LoadFromFile(); err != nil {
+			log.Println(err)
+		}
+	}
+
+	anonymization.InitEncryption(cfg)
+	//TODO debug
+	//fmt.Println("Initializing firewall...")
+	if _, err := firewall.InitializeFirewall("honeynet", "blacklist", "whitelist", cfg.DryRun, cfg.AddBaseObj); err != nil {
+		log.Fatalln("failed to initialize firewall: ", err)
+	}
+
+	binIpOutput := cfg.UseNftables
+	api.RegisterIpApis(cfg.Timestamp, cfg.Url, cfg.Token, cfg.Limit, binIpOutput)
+	api.RegisterUriApis(cfg.Timestamp, cfg.Url, cfg.Token, cfg.Limit)
+
+	if cfg.DryRun {
+		os.Exit(0)
+	}
 }
 
 func startProfiler(isOn bool) {
@@ -68,7 +98,7 @@ func signalHandler(sig os.Signal) {
 	case syscall.SIGINT:
 		fallthrough
 	case syscall.SIGTERM:
-		if err := apiban.GetState().SaveToFile(); err != nil {
+		if err := config.GetState().SaveToFile(); err != nil {
 			log.Println(err)
 		}
 		os.Exit(1)
@@ -84,17 +114,12 @@ func installSignalHandler() chan os.Signal {
 }
 
 func main() {
-	var (
-		err error
-	)
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
 
-	defer func() {
-		cancel()
-	}()
+	defer cancel()
 
-	//	defer os.Exit(0)
+	defer logFile.Close()
 
 	startProfiler(useProfiler)
 
@@ -102,94 +127,32 @@ func main() {
 
 	log.Print("** client start")
 
-	// Open our config file
-	config, err := apiban.LoadConfig()
-	if err != nil {
-		log.Fatalln(err)
-	}
-
-	// Open our Log
-	if config.LogFilename != "-" && config.LogFilename != "stdout" {
-		lf, err := os.OpenFile(config.LogFilename,
-			os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(-1)
-		}
-		defer lf.Close()
-
-		log.SetOutput(lf)
-	}
-
-	if err := apiban.FixConfig(config); err != nil {
-		log.Fatalln(err)
-	}
-	log.Print("target chain:", config.TgtChain)
-
-	log.Print("time interval for checking the list:", config.Tick)
-
-	if config.StateFilename != "" {
-		apiban.GetState().Init(config.StateFilename)
-	}
-	if useStateFile {
-		if err := apiban.GetState().LoadFromFile(); err != nil {
-			log.Println(err)
-		}
-	}
-
-	apiban.InitEncryption(config)
-
-	//TODO debug
-	//fmt.Println("Initializing firewall...")
-	if _, err := apiban.InitializeFirewall("honeynet", "blacklist", "whitelist", config.DryRun, config.AddBaseObj); err != nil {
-		log.Fatalln("failed to initialize firewall: ", err)
-	}
-
-	if config.DryRun {
-		return
-	}
-
-	binIpOutput := config.UseNftables
-	apiban.RegisterIpApis(config.Lkid, config.Url, config.Token, config.Limit, binIpOutput)
-	apiban.RegisterUriApis(config.Lkid, config.Url, config.Token, config.Limit)
-
-	fmt.Println("going to run in a looop")
-	if err := run(ctx, *config, sigChan); err != nil {
+	if err := eventLoop(ctx, cfg.Interval, sigChan); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 	}
 	wg.Wait()
 }
 
-func run(ctx context.Context, config apiban.Config, sigChan chan os.Signal) error {
+func eventLoop(ctx context.Context, interval time.Duration, sigChan chan os.Signal) error {
 	var err error
 	var cnt int
-	// use the last timestamp saved in the state file (if non zero)
-	// Get list of banned ip's from APIBAN.org
-	fmt.Println("URL", config.Url)
-	fmt.Print("TICK", config.Tick)
-	interval := config.Tick
 
 	// start right away
 	currentTimeout := 1 * time.Nanosecond
 	for ticker := time.NewTicker(currentTimeout); ; {
-		t := time.Now()
-		fmt.Println("ticker: ", t)
 		select {
-		/*
-			case <-ctx.Done():
-				return nil
-		*/
+		case <-ctx.Done():
+			return nil
 		case sig := <-sigChan:
 			signalHandler(sig)
 
-		case t = <-ticker.C:
+		case <-ticker.C:
 			cnt++
 			// change the timeout to the one in the configuration
-			fmt.Println("ticker:", t)
-			for _, api := range apiban.Apis {
-				err = api.Process()
+			for _, a := range api.Apis {
+				err = a.Process()
 				if err != nil {
-					log.Printf(`failed to process API "%s": %s`, api.Name, err)
+					log.Printf(`failed to process API "%s": %s`, a.Name, err)
 				}
 			}
 		}
