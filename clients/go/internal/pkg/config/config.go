@@ -1,4 +1,4 @@
-package apiban
+package config
 
 import (
 	//"errors"
@@ -29,18 +29,16 @@ var (
 
 // Config is the structure for the JSON config file
 type Config struct {
-	Apikey   string        `long:"APIKEY" description:"api key"`
-	Token    string        `long:"TOKEN" description:"SSO token"`
-	Lkid     string        `long:"LKID" description:"lk id"`
-	Version  string        `long:"VERSION" description:"protocol version"`
-	Url      string        `long:"URL" description:"URL of blacklisted IPs DB"`
-	Limit    string        `long:"LIMIT" description:"maximum number of IP/URI entries returned in one API reply"`
-	TgtChain string        `long:"CHAIN" description:"netfilter target chain used for matching entries"`
-	Table    string        `long:"TABLE" description:"netfilter filter table"`
-	FwdChain string        `long:"FORWARD" description:"netfilter forwarding base chain"`
-	InChain  string        `long:"INPUT" description:"netfilter input base chain"`
-	Tick     time.Duration `long:"TICK" description:"interval for the list refresh"`
-	Full     string        `long:"FULL" description:"yes/no - starting from scratch"`
+	Token     string        `long:"TOKEN" description:"SSO token"`
+	Timestamp string        `long:"TIMESTAMP" description:"only records with a newer timestamp are returned; 0 means all records are returned"`
+	Version   string        `long:"VERSION" description:"protocol version"`
+	Url       string        `long:"URL" description:"URL of blacklisted IPs DB"`
+	Limit     string        `long:"LIMIT" description:"maximum number of IP/URI entries returned in one API reply"`
+	TgtChain  string        `long:"CHAIN" description:"netfilter target chain used for matching entries"`
+	Table     string        `long:"TABLE" description:"netfilter filter table"`
+	FwdChain  string        `long:"FORWARD" description:"netfilter forwarding base chain"`
+	InChain   string        `long:"INPUT" description:"netfilter input base chain"`
+	Interval  time.Duration `long:"INTERVAL" description:"interval for the list refresh"`
 	// state filename
 	StateFilename string `long:"STATE_FILENAME" description:"filename for keeping the state"`
 	// ttl for the firewall DROP rules
@@ -69,8 +67,7 @@ var DefaultConfig = Config{
 	InChain:     "input",
 	Limit:       "2048",
 	LogFilename: "/var/log/apiban-ipsets.log",
-	Tick:        60 * time.Second,
-	Full:        "no",
+	Interval:    60 * time.Second,
 	UseNftables: true,
 	DryRun:      false,
 	AddBaseObj:  true,
@@ -191,45 +188,39 @@ func LoadConfig() (*Config, error) {
 	return cfg, nil
 }
 
-func FixConfig(apiconfig *Config) error {
-	// reset LKID to 100 if specified in config file
-	if apiconfig.Full == "yes" {
-		log.Print("FULL=yes in config file, resetting LKID")
-		apiconfig.Lkid = defaultId //"100"
-	}
-
+func FixConfig(config *Config) error {
 	// if no LKID, reset it to 100
-	if len(apiconfig.Lkid) == 0 {
-		log.Print("Resetting LKID")
-		apiconfig.Lkid = defaultId // "100"
+	if len(config.Timestamp) == 0 {
+		log.Print("Use 0 timestamp")
+		config.Timestamp = "0"
 	} else {
-		log.Print("LKID:", apiconfig.Lkid)
+		log.Print("TIMESTAMP:", config.Timestamp)
 	}
 
 	// fix the URL
-	if len(apiconfig.Url) == 0 {
-		apiconfig.Url = DefaultConfig.Url
-	} else if apiconfig.Url[len(apiconfig.Url)-1] != '/' {
-		apiconfig.Url = apiconfig.Url + "/"
+	if len(config.Url) == 0 {
+		config.Url = DefaultConfig.Url
+	} else if config.Url[len(config.Url)-1] != '/' {
+		config.Url = config.Url + "/"
 	}
 	// use default
-	if len(apiconfig.Table) == 0 {
-		apiconfig.Table = DefaultConfig.Table
+	if len(config.Table) == 0 {
+		config.Table = DefaultConfig.Table
 	}
-	if len(apiconfig.TgtChain) == 0 {
-		apiconfig.TgtChain = DefaultConfig.TgtChain
+	if len(config.TgtChain) == 0 {
+		config.TgtChain = DefaultConfig.TgtChain
 	}
-	if len(apiconfig.FwdChain) == 0 {
-		apiconfig.FwdChain = DefaultConfig.FwdChain
+	if len(config.FwdChain) == 0 {
+		config.FwdChain = DefaultConfig.FwdChain
 	}
-	if len(apiconfig.InChain) == 0 {
-		apiconfig.InChain = DefaultConfig.InChain
+	if len(config.InChain) == 0 {
+		config.InChain = DefaultConfig.InChain
 	}
-	if apiconfig.Tick == 0 {
-		apiconfig.Tick = DefaultConfig.Tick
+	if config.Interval == 0 {
+		config.Interval = DefaultConfig.Interval
 	}
-	if len(apiconfig.Limit) == 0 {
-		apiconfig.Limit = DefaultConfig.Limit
+	if len(config.Limit) == 0 {
+		config.Limit = DefaultConfig.Limit
 	}
 	return nil
 }
