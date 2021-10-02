@@ -1,4 +1,4 @@
-package apiban
+package config
 
 import (
 	"encoding/json"
