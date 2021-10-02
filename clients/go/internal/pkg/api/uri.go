@@ -1,34 +1,9 @@
-package apiban
+package api
 
 import (
-	"fmt"
 	"log"
 	"net/url"
-	"time"
 )
-
-// URI Resources JSON objects in API responses
-type URI struct {
-	Encrypt string `json:"encrypt"`
-	URI     string `json:"uri"`
-}
-
-func (uri *URI) Process(ttl time.Duration, api APICode) error {
-	fmt.Printf("processing uri: %s", uri.URI)
-	return nil
-}
-
-func (uri *URI) String() string {
-	s, err := uri.Decrypt()
-	if err != nil {
-		return ""
-	}
-	return s
-}
-
-func (uri *URI) Decrypt() (string, error) {
-	return "", nil
-}
 
 // NewBannedUriApi returns an initialized Api object which can be used for retrieving banned (blacklisted) URIs
 func NewBannedUriApi(configId, baseUrl, token, limit string) *Api {

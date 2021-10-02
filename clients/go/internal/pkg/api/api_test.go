@@ -1,4 +1,4 @@
-package apiban
+package api
 
 import (
 	//"fmt"
