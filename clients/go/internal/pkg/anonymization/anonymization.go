@@ -1,4 +1,4 @@
-package apiban
+package anonymization
 
 import (
 	"crypto"
@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/intuitivelabs/anonymization"
+	"github.com/intuitivelabs/apiban/clients/go/internal/pkg/config"
 )
 
 // errors
@@ -30,7 +31,7 @@ const (
 	HmacLen = 5
 )
 
-func InitEncryption(c *Config) {
+func InitEncryption(c *config.Config) {
 	var (
 		err     error
 		encKey  [anonymization.EncryptionKeyLen]byte
