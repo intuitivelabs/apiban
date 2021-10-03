@@ -75,12 +75,16 @@ func AddToPublicBlacklist(elems parser.Elements, ttl time.Duration) (int, error)
 
 func InitializeFirewall(publicBl, bl, wl string, dryRun, addBaseObj bool) (fw Firewall, err error) {
 	if config.GetConfig().UseNftables {
-		fw, err = InitializeNFTables(config.GetConfig().Table, config.GetConfig().FwdChain, config.GetConfig().InChain, config.GetConfig().TgtChain, publicBl, bl, wl, dryRun, addBaseObj)
+		if fw, err = InitializeNFTables(config.GetConfig().Table, config.GetConfig().FwdChain, config.GetConfig().InChain, config.GetConfig().TgtChain, publicBl, bl, wl, dryRun, addBaseObj); err != nil {
+			return nil, err
+		}
 	} else {
-		fw, err = InitializeIPTables(config.GetConfig().TgtChain, publicBl, bl, wl, dryRun)
+		if fw, err = InitializeIPTables(config.GetConfig().TgtChain, publicBl, bl, wl, dryRun); err != nil {
+			return nil, err
+		}
 	}
 	if dryRun {
 		log.Printf("firewall commands:\n%s", fw.GetCommands())
 	}
-	return fw, err
+	return fw, nil
 }
