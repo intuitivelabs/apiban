@@ -184,7 +184,6 @@ func TestIptables(t *testing.T) {
 	var (
 		err error
 		ips []string
-		nft *NFTables
 		ipt *IPTables
 		//cleanup bool = true
 	)
