@@ -21,4 +21,4 @@ jobs:
       run: (cd clients/go; go build -v ./...)
 
     - name: Test
-      run: (cd clients/go/apiban; sudo go test -v ./...)
+      run: (cd clients/go; sudo go test -v ./...)
