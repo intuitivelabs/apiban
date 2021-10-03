@@ -6,6 +6,10 @@ import (
 	//"strconv"
 	"testing"
 	//"time"
+
+	"github.com/intuitivelabs/apiban/clients/go/internal/pkg/anonymization"
+	"github.com/intuitivelabs/apiban/clients/go/internal/pkg/config"
+	"github.com/intuitivelabs/apiban/clients/go/internal/pkg/firewall"
 )
 
 /*
@@ -169,7 +173,8 @@ func TestApiNftables(t *testing.T) {
     }
    ]
 }`)
-	config = Config{
+	cfg := config.GetConfig()
+	*cfg = config.Config{
 		Passphrase:  "reallyworks?",
 		Table:       "filter",
 		FwdChain:    "FORWARD",
@@ -178,9 +183,9 @@ func TestApiNftables(t *testing.T) {
 		DryRun:      true,
 		UseNftables: true,
 	}
-	InitEncryption(&config)
-	RegisterIpApis("", "", "", "", config.UseNftables)
-	if _, err = InitializeFirewall("honeynet", "blacklist", "whitelist", config.DryRun, true); err != nil {
+	anonymization.InitEncryption(cfg)
+	RegisterIpApis("", "", "", "", cfg.UseNftables)
+	if _, err = firewall.InitializeFirewall("honeynet", "blacklist", "whitelist", cfg.DryRun, true); err != nil {
 		t.Fatalf("failed to initialize firewall: %s", err)
 	}
 	t.Run("ipblack parse", func(t *testing.T) {
@@ -349,7 +354,8 @@ func TestApiIptables(t *testing.T) {
     }
    ]
 }`)
-	config = Config{
+	cfg := config.GetConfig()
+	*cfg = config.Config{
 		Passphrase:  "reallyworks?",
 		Table:       "filter",
 		FwdChain:    "FORWARD",
@@ -358,9 +364,9 @@ func TestApiIptables(t *testing.T) {
 		DryRun:      true,
 		UseNftables: false,
 	}
-	InitEncryption(&config)
-	RegisterIpApis("", "", "", "", config.UseNftables)
-	if _, err = InitializeFirewall("honeynet", "blacklist", "whitelist", config.DryRun, true); err != nil {
+	anonymization.InitEncryption(cfg)
+	RegisterIpApis("", "", "", "", cfg.UseNftables)
+	if _, err = firewall.InitializeFirewall("honeynet", "blacklist", "whitelist", cfg.DryRun, true); err != nil {
 		t.Fatalf("failed to initialize firewall: %s", err)
 	}
 	t.Run("ipblack parse", func(t *testing.T) {

@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/intuitivelabs/apiban/clients/go/internal/pkg/config"
 )
 
 func generateAddrRange(prefix string, size int) ([]string, error) {
@@ -45,7 +47,8 @@ func TestNftables(t *testing.T) {
 		nft     *NFTables
 		cleanup bool = true
 	)
-	config = Config{
+	cfg := config.GetConfig()
+	*cfg = config.Config{
 		Passphrase:  "reallyworks?",
 		Table:       "intuitive",
 		FwdChain:    "FORWARD",
@@ -62,7 +65,7 @@ func TestNftables(t *testing.T) {
 		t.Fatalf("could parse duration %s", err)
 	}
 	t.Run("initialize nftables", func(t *testing.T) {
-		fw, fwErr := InitializeFirewall("honeynet", "blacklist", "whitelist", config.DryRun, true)
+		fw, fwErr := InitializeFirewall("honeynet", "blacklist", "whitelist", cfg.DryRun, true)
 		if fwErr != nil {
 			t.Fatalf("%s", fwErr)
 		}
@@ -96,19 +99,19 @@ func TestNftables(t *testing.T) {
 			if chain.Table.Name != nft.Table.Name {
 				continue
 			}
-			if chain.Name == config.TgtChain {
+			if chain.Name == cfg.TgtChain {
 				if !areChainsEql(chain, nft.RegChain) {
-					t.Fatalf(`chain "%s" was not properly created`, config.TgtChain)
+					t.Fatalf(`chain "%s" was not properly created`, cfg.TgtChain)
 				}
 				cnt++
 			}
-			if chain.Name == config.FwdChain {
+			if chain.Name == cfg.FwdChain {
 				if !areChainsEql(chain, nft.FwdChain) {
 					t.Fatalf(`configured chain "%s" different from system chain "%s"`, chainToString(nft.FwdChain), chainToString(chain))
 				}
 				cnt++
 			}
-			if chain.Name == config.InChain {
+			if chain.Name == cfg.InChain {
 				if !areChainsEql(chain, nft.InChain) {
 					t.Fatalf(`configured chain "%s" different from system chain "%s"`, chainToString(nft.InChain), chainToString(chain))
 				}
@@ -185,7 +188,8 @@ func TestIptables(t *testing.T) {
 		ipt *IPTables
 		//cleanup bool = true
 	)
-	config = Config{
+	cfg := config.GetConfig()
+	*cfg = config.Config{
 		Passphrase:  "reallyworks?",
 		TgtChain:    "MONITORING",
 		DryRun:      false,
@@ -199,7 +203,7 @@ func TestIptables(t *testing.T) {
 		t.Fatalf("could parse duration %s", err)
 	}
 	t.Run("initialize iptables", func(t *testing.T) {
-		fw, err := InitializeFirewall("honeynet", "blacklist", "whitelist", config.DryRun, false)
+		fw, err := InitializeFirewall("honeynet", "blacklist", "whitelist", cfg.DryRun, false)
 		if err != nil {
 			t.Fatalf("%s", err)
 		}
@@ -208,22 +212,22 @@ func TestIptables(t *testing.T) {
 			t.Fatalf("iptables was not correctly initialized")
 		}
 		// Check if the rules in the base chains exists
-		ok, err := ipTables.t.Exists("filter", "INPUT", "-j", config.TgtChain)
+		ok, err := ipTables.t.Exists("filter", "INPUT", "-j", cfg.TgtChain)
 		if err != nil || !ok {
-			t.Fatalf("iptables does not contain target chain %s rule in chain INPUT", config.TgtChain)
+			t.Fatalf("iptables does not contain target chain %s rule in chain INPUT", cfg.TgtChain)
 		}
-		ok, err = ipTables.t.Exists("filter", "FORWARD", "-j", config.TgtChain)
+		ok, err = ipTables.t.Exists("filter", "FORWARD", "-j", cfg.TgtChain)
 		if err != nil || !ok {
-			t.Fatalf("iptables does not contain target chain %s rule in chain FORWARD", config.TgtChain)
+			t.Fatalf("iptables does not contain target chain %s rule in chain FORWARD", cfg.TgtChain)
 		}
 		// Check if the rules in the target chain exists
-		ok, err = ipTables.t.Exists("filter", config.TgtChain, "-m", "set", "--match-set", "blacklist", "src", "-j", "DROP")
+		ok, err = ipTables.t.Exists("filter", cfg.TgtChain, "-m", "set", "--match-set", "blacklist", "src", "-j", "DROP")
 		if err != nil || !ok {
-			t.Fatalf("iptables does not contain blacklist rule in chain %s", config.TgtChain)
+			t.Fatalf("iptables does not contain blacklist rule in chain %s", cfg.TgtChain)
 		}
-		ok, err = ipTables.t.Exists("filter", config.TgtChain, "-m", "set", "--match-set", "whitelist", "src", "-j", "ACCEPT")
+		ok, err = ipTables.t.Exists("filter", cfg.TgtChain, "-m", "set", "--match-set", "whitelist", "src", "-j", "ACCEPT")
 		if err != nil || !ok {
-			t.Fatalf("iptables does not contain whitelist rule in chain %s", config.TgtChain)
+			t.Fatalf("iptables does not contain whitelist rule in chain %s", cfg.TgtChain)
 		}
 	})
 	t.Run("blacklist", func(t *testing.T) {
@@ -235,7 +239,7 @@ func TestIptables(t *testing.T) {
 		}
 	})
 	t.Run("whitelist", func(t *testing.T) {
-		if nft == nil {
+		if ipt == nil {
 			t.Skipf("iptables was not properly initialized")
 		}
 		if _, err := ipt.AddToWhitelist(ips[:], u); err != nil {
