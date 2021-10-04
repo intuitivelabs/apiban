@@ -1,5 +1,5 @@
 [Unit]
-Description=APIBan IPTables service schedule
+Description=Policy daemon service schedule
 
 [Timer]
 OnUnitActiveSec=300
