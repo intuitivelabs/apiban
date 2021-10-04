@@ -1,10 +1,10 @@
 [Unit]
-Description=Apiban based client for blocking banned IP addresses using ipsets
+Description=Policy deamon for blocking banned IP addresses using ipsets
 After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/apiban-ipsets
+ExecStart=/usr/local/bin/polda
 Restart=always
 TimeoutStopSec=300
 RestartSec=60
